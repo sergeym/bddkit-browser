@@ -4,6 +4,7 @@
 
 mod config;
 mod reply;
+mod webdriver;
 
 use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
