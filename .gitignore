@@ -5,3 +5,5 @@
 /examples/browser.local.yaml
 /examples/.bddkit/plugins.local.yaml
 /.idea/
+# local k3s stand, per machine
+/dev-stack.k8s.yaml
