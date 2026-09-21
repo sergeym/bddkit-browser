@@ -2,6 +2,7 @@
 //! for it and never looks inside, so every check a typo could trip is here.
 //! Shape only: nothing in this module opens a socket or runs a process.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
@@ -48,12 +49,58 @@ impl Browser {
             Self::Firefox => "-headless",
         }
     }
+
+    /// What `selenium-manager --browser` takes.
+    // Task 14 invokes Selenium Manager and reads this; unused outside tests until then.
+    #[allow(dead_code)]
+    pub fn manager_name(self) -> &'static str {
+        match self {
+            Self::Chrome => "chrome",
+            Self::Firefox => "firefox",
+            Self::Edge => "edge",
+        }
+    }
 }
 
-/// Where the browser comes from. Phase 3 adds `Managed`.
+/// Managed mode: the plugin brings the browser via Selenium Manager.
+/// Task 14 reads these fields to invoke it; unused outside tests until then.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct Managed {
+    pub version: String,
+    pub browser_path: Option<PathBuf>,
+    pub offline: bool,
+    pub cache_dir: PathBuf,
+    pub proxy: Option<Url>,
+    pub mirror_url: Option<Url>,
+}
+
+/// Where the browser comes from.
 #[derive(Debug, Clone)]
 pub enum Mode {
-    Remote { url: Url },
+    Remote {
+        url: Url,
+    },
+    // Task 15 reads the payload when it wires managed mode into `Instance::open`.
+    #[allow(dead_code)]
+    Managed(Managed),
+}
+
+const MANAGED_KEYS: [&str; 6] = [
+    "version",
+    "browser_path",
+    "offline",
+    "cache_dir",
+    "proxy",
+    "mirror_url",
+];
+
+/// `~/x` → `$HOME/x`; anything else untouched.
+pub fn expand_home(s: &str) -> PathBuf {
+    match s.strip_prefix("~/") {
+        Some(rest) => Path::new(&std::env::var("HOME").unwrap_or_default()).join(rest),
+        None => PathBuf::from(s),
+    }
 }
 
 /// What a failed step writes into `artifacts_dir`, beside the URL/title and
@@ -125,10 +172,52 @@ const FIELDS: &[Field] = &[
     },
     Field {
         name: "url",
-        required: true,
+        required: false,
         value_type: None,
-        description: "WebDriver endpoint to connect to: a Selenium Grid, a selenium/standalone-* container, a vendor cloud",
+        description: "WebDriver endpoint to connect to (remote mode): a Selenium Grid, a selenium/standalone-* container, a vendor cloud. Omit it for managed mode, where the plugin brings the browser through Selenium Manager",
         example: Some("http://localhost:4444"),
+    },
+    Field {
+        name: "version",
+        required: false,
+        value_type: None,
+        description: "managed mode: stable (default), beta, nightly, esr or a major version such as 131; exclusive with browser_path",
+        example: Some("stable"),
+    },
+    Field {
+        name: "browser_path",
+        required: false,
+        value_type: None,
+        description: "managed mode: use this installed browser and download only its driver; exclusive with version",
+        example: Some("/usr/bin/google-chrome"),
+    },
+    Field {
+        name: "offline",
+        required: false,
+        value_type: Some("boolean"),
+        description: "managed mode: never download; fail if the cache does not hold the browser and driver",
+        example: Some("true"),
+    },
+    Field {
+        name: "cache_dir",
+        required: false,
+        value_type: None,
+        description: "managed mode: where browsers and drivers are cached; defaults to ~/.cache/bddkit/plugins/browser",
+        example: Some("~/.cache/bddkit/plugins/browser"),
+    },
+    Field {
+        name: "proxy",
+        required: false,
+        value_type: None,
+        description: "managed mode: proxy URL for the downloads",
+        example: Some("http://proxy:3128"),
+    },
+    Field {
+        name: "mirror_url",
+        required: false,
+        value_type: None,
+        description: "managed mode: mirror for browser and driver downloads, for networks that cannot reach Google, Mozilla and GitHub",
+        example: None,
     },
     Field {
         name: "base_url",
@@ -222,7 +311,19 @@ pub(crate) fn optional_bool(v: &Value, key: &str, default: bool) -> Result<bool,
 
 fn optional_url(v: &Value, key: &str) -> Result<Option<Url>, String> {
     optional_string(v, key)?
-        .map(|s| Url::parse(&s).map_err(|e| format!("\"{key}\" {s:?} is not an absolute URL: {e}")))
+        .map(|s| {
+            let url = Url::parse(&s)
+                .map_err(|e| format!("\"{key}\" {s:?} is not an absolute URL: {e}"))?;
+            // A scheme-only string like "proxy:3128" parses under WHATWG rules
+            // (opaque path, no host) but is not the network endpoint the caller
+            // means; require a host so a missing "//" is refused, not silently accepted.
+            if url.host().is_none() {
+                return Err(format!(
+                    "\"{key}\" {s:?} is not an absolute URL: missing host"
+                ));
+            }
+            Ok(url)
+        })
         .transpose()
 }
 
@@ -267,10 +368,53 @@ impl InstanceConfig {
         let browser = Browser::parse(&browser_raw).ok_or_else(|| {
             format!("\"browser\" must be chrome, firefox or edge, got {browser_raw:?}")
         })?;
-        let url = required_string(config, "url")?;
-        let url =
-            Url::parse(&url).map_err(|e| format!("\"url\" {url:?} is not an absolute URL: {e}"))?;
-        let mode = Mode::Remote { url };
+        let url = optional_string(config, "url")?;
+        let mode = match url {
+            Some(u) if u.is_empty() => {
+                return Err("\"url\" must not be empty; omit it for managed mode".to_string());
+            }
+            Some(u) => {
+                if let Some(key) = MANAGED_KEYS
+                    .iter()
+                    .find(|k| config.get(**k).is_some_and(|v| !v.is_null()))
+                {
+                    return Err(format!(
+                        "\"{key}\" is a managed-mode key and cannot be set beside \"url\": a remote endpoint owns its own browsers"
+                    ));
+                }
+                Mode::Remote {
+                    url: Url::parse(&u)
+                        .map_err(|e| format!("\"url\" {u:?} is not an absolute URL: {e}"))?,
+                }
+            }
+            None => {
+                let version = optional_string(config, "version")?;
+                let browser_path =
+                    optional_string(config, "browser_path")?.map(|p| expand_home(&p));
+                if version.is_some() && browser_path.is_some() {
+                    return Err(
+                        "\"version\" and \"browser_path\" are exclusive: name a version to download, or a path to use"
+                            .to_string(),
+                    );
+                }
+                if let Some(p) = &browser_path
+                    && !p.is_file()
+                {
+                    return Err(format!("\"browser_path\" {} is not a file", p.display()));
+                }
+                Mode::Managed(Managed {
+                    version: version.unwrap_or_else(|| "stable".to_string()),
+                    browser_path,
+                    offline: optional_bool(config, "offline", false)?,
+                    cache_dir: optional_string(config, "cache_dir")?.map_or_else(
+                        || expand_home("~/.cache/bddkit/plugins/browser"),
+                        |s| expand_home(&s),
+                    ),
+                    proxy: optional_url(config, "proxy")?,
+                    mirror_url: optional_url(config, "mirror_url")?,
+                })
+            }
+        };
         let base_url = optional_url(config, "base_url")?;
         let headless = optional_bool(config, "headless", true)?;
         let window = match optional_string(config, "window")? {
@@ -368,7 +512,7 @@ mod tests {
                 json!({"browser": "safari", "url": "http://h:4444"}),
                 "safari",
             ),
-            (json!({"browser": "chrome"}), "url"),
+            (json!({"browser": "chrome", "url": ""}), "url"),
             (json!({"browser": "chrome", "url": "not a url"}), "url"),
             (
                 json!({"browser": "chrome", "url": "http://h:4444", "bogus": 1}),
@@ -468,6 +612,77 @@ mod tests {
             base,
             json!({"a": {"x": 1, "y": 2, "list": [1, 2]}, "s": "new", "n": true})
         );
+    }
+
+    #[test]
+    fn without_url_the_mode_is_managed_with_defaults() {
+        let c = InstanceConfig::parse(&json!({"browser": "firefox"})).expect("valid");
+        let Mode::Managed(m) = &c.mode else {
+            panic!("managed")
+        };
+        assert_eq!(m.version, "stable");
+        assert!(
+            m.browser_path.is_none() && !m.offline && m.proxy.is_none() && m.mirror_url.is_none()
+        );
+        let home = std::env::var("HOME").expect("HOME");
+        assert_eq!(
+            m.cache_dir,
+            std::path::Path::new(&home).join(".cache/bddkit/plugins/browser")
+        );
+        assert_eq!(c.browser.manager_name(), "firefox");
+    }
+
+    #[test]
+    fn managed_keys_are_read_and_refused_beside_url() {
+        let file = tempfile::NamedTempFile::new().expect("tmp");
+        let path = file.path().display().to_string();
+        let c = InstanceConfig::parse(&json!({"browser": "chrome", "browser_path": path, "offline": true, "cache_dir": "/var/cache/b", "proxy": "http://proxy:3128", "mirror_url": "https://mirror.test/"})).expect("valid");
+        let Mode::Managed(m) = &c.mode else {
+            panic!("managed")
+        };
+        assert_eq!(m.browser_path.as_deref(), Some(file.path()));
+        assert!(m.offline);
+        assert_eq!(m.cache_dir, std::path::PathBuf::from("/var/cache/b"));
+        assert_eq!(
+            m.proxy.as_ref().map(|u| u.as_str()),
+            Some("http://proxy:3128/")
+        );
+        assert_eq!(
+            m.mirror_url.as_ref().map(|u| u.as_str()),
+            Some("https://mirror.test/")
+        );
+
+        let cases: Vec<(Value, &str)> = vec![
+            (
+                json!({"browser": "chrome", "url": "http://h:4444", "version": "beta"}),
+                "version",
+            ),
+            (
+                json!({"browser": "chrome", "url": "http://h:4444", "offline": true}),
+                "offline",
+            ),
+            (
+                json!({"browser": "chrome", "version": "beta", "browser_path": path}),
+                "browser_path",
+            ),
+            (
+                json!({"browser": "chrome", "browser_path": "/nope/chrome"}),
+                "/nope/chrome",
+            ),
+            (json!({"browser": "chrome", "proxy": "proxy:3128"}), "proxy"),
+            (json!({"browser": "chrome", "offline": "yes"}), "offline"),
+        ];
+        for (body, needle) in cases {
+            let error = InstanceConfig::parse(&body).expect_err("must be refused");
+            assert!(error.contains(needle), "{body}: {error}");
+        }
+    }
+
+    #[test]
+    fn expand_home_replaces_only_a_leading_tilde() {
+        let home = std::env::var("HOME").expect("HOME");
+        assert_eq!(expand_home("~/x"), std::path::Path::new(&home).join("x"));
+        assert_eq!(expand_home("/a/~/x"), std::path::PathBuf::from("/a/~/x"));
     }
 
     #[test]

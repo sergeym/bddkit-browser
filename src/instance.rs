@@ -25,7 +25,10 @@ impl Instance {
     /// `debug` seeds the driver's initial trace state only; every dispatch
     /// afterward follows the request through `Driver::set_debug`.
     pub fn open(config: InstanceConfig, debug: bool) -> Result<Self, String> {
-        let Mode::Remote { url } = &config.mode;
+        let url = match &config.mode {
+            Mode::Remote { url } => url.clone(),
+            Mode::Managed(_) => return Err("managed mode arrives in the next task".to_string()),
+        };
         let driver = Arc::new(Driver::new(url.clone(), debug));
         let (session, info) = driver
             .new_session(&config.session_capabilities(None))
