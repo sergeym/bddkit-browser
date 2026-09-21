@@ -184,11 +184,17 @@ impl Driver {
         let sent = match method {
             "GET" => self.agent.get(url.as_str()).call(),
             "DELETE" => self.agent.delete(url.as_str()).call(),
-            // WebDriver requires a JSON object body on every POST.
-            _ => self
-                .agent
-                .post(url.as_str())
-                .send_json(body.cloned().unwrap_or_else(|| json!({}))),
+            // WebDriver requires a JSON object body on every POST. Sent as
+            // compact bytes rather than `send_json` (which pretty-prints):
+            // the recorded `request_body` above must match what actually
+            // went over the wire, and evidence dumps stay one line per call.
+            _ => {
+                let compact = body.cloned().unwrap_or_else(|| json!({})).to_string();
+                self.agent
+                    .post(url.as_str())
+                    .content_type("application/json")
+                    .send(compact)
+            }
         };
         let mut response = match sent {
             Ok(r) => r,

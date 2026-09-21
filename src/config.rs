@@ -25,7 +25,6 @@ impl Browser {
     }
 
     /// The W3C `browserName` value.
-    #[allow(dead_code)]
     pub fn browser_name(self) -> &'static str {
         match self {
             Self::Chrome => "chrome",
@@ -35,7 +34,6 @@ impl Browser {
     }
 
     /// The vendor capability that carries `args` and `binary`.
-    #[allow(dead_code)]
     pub fn options_key(self) -> &'static str {
         match self {
             Self::Chrome => "goog:chromeOptions",
@@ -44,7 +42,6 @@ impl Browser {
         }
     }
 
-    #[allow(dead_code)]
     fn headless_arg(self) -> &'static str {
         match self {
             Self::Chrome | Self::Edge => "--headless=new",
@@ -55,7 +52,6 @@ impl Browser {
 
 /// Where the browser comes from. Phase 3 adds `Managed`.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum Mode {
     Remote { url: Url },
 }
@@ -94,7 +90,6 @@ impl OnFailure {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct InstanceConfig {
     pub browser: Browser,
     pub mode: Mode,
@@ -237,7 +232,6 @@ fn parse_window(s: &str) -> Option<(u32, u32)> {
 }
 
 /// Objects merge recursively, arrays concatenate, scalars replace.
-#[allow(dead_code)]
 pub fn deep_merge(base: &mut Value, over: &Value) {
     match (base, over) {
         (Value::Object(b), Value::Object(o)) => {
@@ -325,7 +319,6 @@ impl InstanceConfig {
 
     /// The whole `POST /session` body. `binary` is the managed-mode browser
     /// executable; remote mode passes `None`.
-    #[allow(dead_code)]
     pub fn session_capabilities(&self, binary: Option<&str>) -> Value {
         let mut args: Vec<Value> = Vec::new();
         if self.headless {
