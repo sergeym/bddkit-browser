@@ -12,7 +12,7 @@ use crate::config::InstanceConfig;
 use crate::find::{self, Lookup};
 use crate::instance::Instance;
 use crate::reply::{self, Ctx, Diagnostic};
-use crate::webdriver::Element;
+use crate::webdriver::{Element, Strategy};
 
 pub struct Step {
     pub pattern: &'static str,
@@ -335,10 +335,50 @@ fn look<'a>(instance: &'a Instance, lookup: &Lookup) -> Result<Option<Element<'a
 fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Value>, Fail> {
     let s = &instance.session;
     let arg = |n: usize| req.args.get(n).cloned().unwrap_or_default();
-    let vars = Map::new();
+    let mut vars = Map::new();
     match index {
         0 => s.navigate(resolve_url(&instance.config, &arg(0))?.as_str())?,
         1 => s.refresh()?,
+        2 => act(instance, &find::link(&arg(0)))?.click()?,
+        3 => act(instance, &find::button(&arg(0)))?.click()?,
+        4 => act(instance, &find::selector(&arg(0)))?.click()?,
+        5 => {
+            let e = act(instance, &find::field(&arg(0)))?;
+            e.clear()?;
+            e.send_keys(&arg(1))?;
+        }
+        6 => {
+            let lookup = find::field(&arg(1));
+            let select = act(instance, &lookup)?;
+            let option = select
+                .find(Strategy::XPath, &find::option_xpath(&arg(0)))?
+                .ok_or_else(|| fatal(format!("no option {:?} in {}", arg(0), lookup.what)))?;
+            option.click()?;
+        }
+        7 | 8 => {
+            let wanted = index == 7;
+            let e = act(instance, &find::field(&arg(0)))?;
+            if e.selected()? != wanted {
+                e.click()?;
+            }
+        }
+        9 => {
+            let path = resolve_file(&req.ctx.workspace_dir, &arg(0));
+            if !path.is_file() {
+                return Err(fatal(format!("{} is not a file", path.display())));
+            }
+            act(instance, &find::field(&arg(1)))?.send_keys(&path.display().to_string())?;
+        }
+        12 => {
+            let text = act(instance, &find::selector(&arg(0)))?.text()?;
+            vars.insert(arg(1), Value::String(text.trim().to_string()));
+        }
+        13 => {
+            let value = act(instance, &find::selector(&arg(1)))?
+                .attribute(&arg(0))?
+                .ok_or_else(|| fatal(format!("the element has no attribute {:?}", arg(0))))?;
+            vars.insert(arg(2), Value::String(value));
+        }
         15 => {
             let raw = s.current_url()?;
             let current = Url::parse(&raw).map_err(|e| {
@@ -360,6 +400,77 @@ fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Val
                     "the title is {title:?}, expected {:?}",
                     arg(0)
                 )));
+            }
+        }
+        17 | 18 => {
+            let body = s
+                .find(Strategy::Css, "body")?
+                .ok_or_else(|| fatal("the page has no body element"))?;
+            let text = collapse(&body.text()?);
+            let wanted = collapse(&arg(0));
+            let has = text.contains(&wanted);
+            if has != (index == 17) {
+                let verb = if index == 17 {
+                    "does not contain"
+                } else {
+                    "contains"
+                };
+                return Err(not_yet(format!("the page {verb} {wanted:?}")));
+            }
+        }
+        19 | 20 => {
+            let lookup = find::selector(&arg(0));
+            let Some(e) = look(instance, &lookup)? else {
+                return Err(not_yet(format!("no {} on the page", lookup.what)));
+            };
+            let text = collapse(&e.text()?);
+            let wanted = collapse(&arg(1));
+            if text.contains(&wanted) != (index == 19) {
+                let verb = if index == 19 {
+                    "does not contain"
+                } else {
+                    "contains"
+                };
+                return Err(not_yet(format!(
+                    "{} {verb} {wanted:?}: its text is {text:?}",
+                    lookup.what
+                )));
+            }
+        }
+        21 | 22 => {
+            let lookup = find::selector(&arg(0));
+            let visible = match look(instance, &lookup)? {
+                Some(e) => e.displayed()?,
+                None => false,
+            };
+            if visible != (index == 21) {
+                let state = if visible { "visible" } else { "not visible" };
+                return Err(not_yet(format!("{} is {state}", lookup.what)));
+            }
+        }
+        23 => {
+            let lookup = find::field(&arg(0));
+            let Some(e) = look(instance, &lookup)? else {
+                return Err(not_yet(format!("no {} on the page", lookup.what)));
+            };
+            let value = scalar_text(&e.property("value")?);
+            if value != arg(1) {
+                return Err(not_yet(format!(
+                    "{} holds {value:?}, expected {:?}",
+                    lookup.what,
+                    arg(1)
+                )));
+            }
+        }
+        24 | 25 => {
+            let lookup = find::field(&arg(0));
+            let Some(e) = look(instance, &lookup)? else {
+                return Err(not_yet(format!("no {} on the page", lookup.what)));
+            };
+            let checked = e.selected()?;
+            if checked != (index == 24) {
+                let state = if checked { "checked" } else { "unchecked" };
+                return Err(not_yet(format!("{} is {state}", lookup.what)));
             }
         }
         other => return Err(fatal(format!("step {other} is not implemented yet"))),
