@@ -116,7 +116,7 @@ Selectors are CSS by default; prefix with `xpath=` for an XPath expression, or `
 
 ## Waits
 
-An action (0–14, 26–28) waits up to `find_timeout_secs` for its element to appear, polling every 100 ms; `0` disables the wait and the action fails immediately on a missing element. An assertion (15–25, 29–31) looks exactly once — it never polls on its own — so a condition that has not settled yet (a click that triggers an async render, a request still in flight) is armed with the host's own eventual assertion: `I expect the next assertion to pass within "N" seconds`.
+An action (0–14) waits up to `find_timeout_secs` for its element to appear, polling every 100 ms; `0` disables the wait and the action fails immediately on a missing element. An assertion (15–25, 29–31) looks exactly once — it never polls on its own — so a condition that has not settled yet (a click that triggers an async render, a request still in flight) is armed with the host's own eventual assertion: `I expect the next assertion to pass within "N" seconds`. The dump/read-status steps (26–28) read the console and network buffers as they stand at that instant and never wait either — arm an eventual assertion (30 or 31) first when the request they need might still be in flight.
 
 ## Evidence
 
