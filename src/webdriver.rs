@@ -106,8 +106,6 @@ pub struct Driver {
 pub struct SessionInfo {
     pub browser_name: String,
     pub browser_version: String,
-    /// Unused until the BiDi client (`bidi.rs`, a later task) dials it.
-    #[allow(dead_code)]
     pub websocket_url: Option<String>,
 }
 

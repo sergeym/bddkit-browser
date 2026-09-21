@@ -40,9 +40,6 @@ impl Diagnostic {
         }
     }
 
-    /// Unused until the BiDi console/network capture (a later task) feeds
-    /// `on_failure.console`/`.network` into a diagnostic.
-    #[allow(dead_code)]
     pub fn json(title: impl Into<String>, value: &Value) -> Self {
         let rendered = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
         Self {

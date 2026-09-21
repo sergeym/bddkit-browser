@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::bidi::Bidi;
 use crate::config::{InstanceConfig, Mode};
 use crate::webdriver::{Driver, Session, SessionInfo};
 
@@ -10,6 +11,7 @@ pub struct Instance {
     pub config: InstanceConfig,
     pub session: Session,
     pub info: SessionInfo,
+    pub bidi: Option<Bidi>,
 }
 
 /// Storage is cleared while the page is still on the application's origin:
@@ -33,16 +35,25 @@ impl Instance {
                     config.browser.browser_name()
                 )
             })?;
-        let instance = Self {
+        let mut instance = Self {
             config,
             session,
             info,
+            bidi: None,
         };
         let (w, h) = instance.config.window;
         if let Err(e) = instance.session.set_window_rect(w, h) {
             let _ = instance.session.delete();
             return Err(format!("cannot size the window to {w}x{h}: {e}"));
         }
+        let bidi = match &instance.info.websocket_url {
+            Some(ws) => Some(Bidi::connect(ws, debug).map_err(|e| {
+                let _ = instance.session.delete();
+                format!("the session advertised BiDi at {ws} but it cannot be used: {e}")
+            })?),
+            None => None,
+        };
+        instance.bidi = bidi;
         if debug {
             eprintln!(
                 "[browser] session {} on {} {}",
@@ -63,10 +74,18 @@ impl Instance {
         self.session
             .navigate("about:blank")
             .map_err(|e| format!("leaving the page: {e}"))?;
+        if let Some(bidi) = &self.bidi
+            && let Ok(mut b) = bidi.buffers().lock()
+        {
+            b.clear();
+        }
         Ok(())
     }
 
     pub fn close(&self) -> Result<(), String> {
+        if let Some(bidi) = &self.bidi {
+            bidi.close();
+        }
         self.session
             .delete()
             .map_err(|e| format!("closing the session: {e}"))

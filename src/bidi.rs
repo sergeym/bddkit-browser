@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! WebDriver BiDi: the event side of the session. One WebSocket, one reader
 //! thread, two buffers a scenario reads and the reset empties.
 

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 use url::Url;
 
+use crate::bidi::{Bidi, Buffers};
 use crate::config::InstanceConfig;
 use crate::find::{self, Lookup};
 use crate::instance::Instance;
@@ -148,6 +149,36 @@ pub const STEPS: &[Step] = &[
         pattern: r#"^the "(?P<field>[^"]+)" checkbox should be unchecked$"#,
         kind: "assertion",
         description: "the checkbox is not ticked",
+    },
+    Step {
+        pattern: r#"^I dump the browser console$"#,
+        kind: "action",
+        description: "writes the scenario's console entries as console.json into the artifacts directory",
+    },
+    Step {
+        pattern: r#"^I dump the network log$"#,
+        kind: "action",
+        description: "writes the scenario's requests (method, URL, status, headers, timings — no bodies) as network.json",
+    },
+    Step {
+        pattern: r#"^I read the status of the last request to "(?P<path>[^"]+)" as "(?P<name>[^"]+)"$"#,
+        kind: "action",
+        description: "stores the HTTP status of the most recent request whose path starts with this",
+    },
+    Step {
+        pattern: r#"^the browser console should have no errors$"#,
+        kind: "assertion",
+        description: "no console.error and no uncaught exception since the scenario started",
+    },
+    Step {
+        pattern: r#"^the browser should have sent a "(?P<method>[A-Z]+)" request to "(?P<path>[^"]+)"$"#,
+        kind: "assertion",
+        description: "some request of the scenario has this method and a path starting with this",
+    },
+    Step {
+        pattern: r#"^the last request to "(?P<path>[^"]+)" should have status "(?P<code>\d+)"$"#,
+        kind: "assertion",
+        description: "the most recent request whose path starts with this has completed with this status",
     },
 ];
 
@@ -331,6 +362,23 @@ fn look<'a>(instance: &'a Instance, lookup: &Lookup) -> Result<Option<Element<'a
     Ok(find::find_once(&instance.session, lookup)?)
 }
 
+fn bidi_or_fail(instance: &Instance) -> Result<&Bidi, Fail> {
+    instance.bidi.as_ref().ok_or_else(|| {
+        fatal(
+            "the session has no BiDi channel (the driver returned no webSocketUrl); the console and network steps need Chrome/Edge 116+, Firefox 129+, or a Grid that passes BiDi through",
+        )
+    })
+}
+
+fn with_buffers<T>(instance: &Instance, f: impl FnOnce(&Buffers) -> T) -> Result<T, Fail> {
+    let bidi = bidi_or_fail(instance)?;
+    let buffers = bidi.buffers();
+    let guard = buffers
+        .lock()
+        .map_err(|_| fatal("the BiDi buffers are poisoned"))?;
+    Ok(f(&guard))
+}
+
 fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Value>, Fail> {
     let s = &instance.session;
     let arg = |n: usize| req.args.get(n).cloned().unwrap_or_default();
@@ -493,6 +541,86 @@ fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Val
                 return Err(not_yet(format!("{} is {state}", lookup.what)));
             }
         }
+        26 | 27 => {
+            let (name, value) = with_buffers(instance, |b| {
+                if index == 26 {
+                    (
+                        "console.json",
+                        serde_json::to_value(&b.console).unwrap_or(Value::Null),
+                    )
+                } else {
+                    (
+                        "network.json",
+                        serde_json::to_value(&b.network).unwrap_or(Value::Null),
+                    )
+                }
+            })?;
+            let rendered = serde_json::to_string_pretty(&value).unwrap_or_default();
+            let path = write_artifact(&req.ctx, name, rendered.as_bytes())?;
+            if req.ctx.debug {
+                eprintln!("[browser] {name}: {}\n{rendered}", path.display());
+            }
+        }
+        28 => {
+            let status = with_buffers(instance, |b| b.last_to(&arg(0)).and_then(|e| e.status))?
+                .ok_or_else(|| {
+                    fatal(format!(
+                        "no completed request to {:?} in this scenario",
+                        arg(0)
+                    ))
+                })?;
+            vars.insert(arg(1), Value::String(status.to_string()));
+        }
+        29 => {
+            let errors: Vec<String> = with_buffers(instance, |b| {
+                b.errors()
+                    .map(|e| format!("[{}] {}", e.source, e.text))
+                    .collect()
+            })?;
+            if !errors.is_empty() {
+                return Err(fatal(format!(
+                    "{} error(s) in the browser console:\n{}",
+                    errors.len(),
+                    errors.join("\n")
+                )));
+            }
+        }
+        30 => {
+            let seen = with_buffers(instance, |b| {
+                b.network
+                    .iter()
+                    .any(|e| e.method == arg(0) && crate::bidi::path_starts_with(&e.url, &arg(1)))
+            })?;
+            if !seen {
+                return Err(not_yet(format!(
+                    "no {} request to {:?} yet",
+                    arg(0),
+                    arg(1)
+                )));
+            }
+        }
+        31 => {
+            let found = with_buffers(instance, |b| {
+                b.last_to(&arg(0)).map(|e| (e.method.clone(), e.status))
+            })?;
+            match found {
+                None => return Err(not_yet(format!("no request to {:?} yet", arg(0)))),
+                Some((method, None)) => {
+                    return Err(not_yet(format!(
+                        "the {method} request to {:?} has no response yet",
+                        arg(0)
+                    )));
+                }
+                Some((method, Some(status))) if status.to_string() != arg(1) => {
+                    return Err(not_yet(format!(
+                        "the last {method} request to {:?} answered {status}, expected {}",
+                        arg(0),
+                        arg(1)
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
         other => return Err(fatal(format!("unknown step index {other}"))),
     }
     Ok(vars)
@@ -526,6 +654,22 @@ fn evidence(instance: &Instance, req: &Request) -> Vec<Diagnostic> {
             )),
         }
     }
+    if let Some(bidi) = &instance.bidi
+        && let Ok(b) = bidi.buffers().lock()
+    {
+        if instance.config.on_failure.console {
+            out.push(Diagnostic::json(
+                "Console",
+                &serde_json::to_value(&b.console).unwrap_or(Value::Null),
+            ));
+        }
+        if instance.config.on_failure.network {
+            out.push(Diagnostic::json(
+                "Network",
+                &serde_json::to_value(&b.network).unwrap_or(Value::Null),
+            ));
+        }
+    }
     if let Some(exchange) = last {
         out.push(Diagnostic::http("WebDriver", exchange.render()));
     }
@@ -541,8 +685,8 @@ mod tests {
         let steps: Vec<Value> = serde_json::from_str(&steps_json()).expect("JSON");
         assert_eq!(
             steps.len(),
-            26,
-            "phase 1 declares 26 steps; append, never reorder"
+            32,
+            "phase 1 declares 26 steps, task 11 adds 6 more; append, never reorder"
         );
         for (i, s) in steps.iter().enumerate() {
             let p = s["pattern"].as_str().expect("pattern");

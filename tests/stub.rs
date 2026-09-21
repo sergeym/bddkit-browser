@@ -37,6 +37,12 @@ pub struct StubState {
     /// `find` answers "no such element" this many times first.
     pub not_found_first: u32,
     pub script_result: Value,
+    /// When true the session reply advertises `webSocketUrl` = the stub's `/bidi`.
+    pub bidi: bool,
+    /// Sent on the socket right after the subscribe is acknowledged.
+    pub events: Vec<Value>,
+    /// Filled by `start_stub`.
+    pub ws_url: String,
 }
 
 type Shared = Arc<Mutex<StubState>>;
@@ -54,7 +60,9 @@ pub fn start_stub(state: StubState) -> Stub {
         .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
+    shared.lock().expect("state").ws_url = format!("ws://{addr}/bidi");
     let app = Router::new()
+        .route("/bidi", axum::routing::get(bidi_socket))
         .fallback(handle)
         .with_state(Arc::clone(&shared));
     rt.spawn(async move { axum::serve(listener, app).await.expect("serve") });
@@ -63,6 +71,31 @@ pub fn start_stub(state: StubState) -> Stub {
         state: shared,
         _rt: rt,
     }
+}
+
+async fn bidi_socket(
+    State(state): State<Shared>,
+    upgrade: axum::extract::ws::WebSocketUpgrade,
+) -> axum::response::Response {
+    upgrade.on_upgrade(move |mut socket| async move {
+        use axum::extract::ws::Message;
+        // The subscribe comes first; acknowledge it by id.
+        if let Some(Ok(Message::Text(text))) = socket.recv().await {
+            let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            let ack = json!({"id": v["id"], "type": "success", "result": {}}).to_string();
+            let _ = socket.send(Message::Text(ack.into())).await;
+        }
+        let events = state.lock().expect("state").events.clone();
+        for event in events {
+            let _ = socket.send(Message::Text(event.to_string().into())).await;
+        }
+        // Stay open until the plugin closes.
+        while let Some(Ok(message)) = socket.recv().await {
+            if matches!(message, Message::Close(_)) {
+                break;
+            }
+        }
+    })
 }
 
 fn reply(v: Value) -> (StatusCode, Json<Value>) {
@@ -94,9 +127,13 @@ async fn handle(
     let req: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     match (method.as_str(), segments.as_slice()) {
         ("GET", ["status"]) => reply(json!({"ready": true, "message": "stub"})),
-        ("POST", ["session"]) => reply(
-            json!({"sessionId": "s1", "capabilities": {"browserName": "chrome", "browserVersion": "131.0"}}),
-        ),
+        ("POST", ["session"]) => {
+            let mut caps = json!({"browserName": "chrome", "browserVersion": "131.0"});
+            if st.bidi {
+                caps["webSocketUrl"] = json!(st.ws_url);
+            }
+            reply(json!({"sessionId": "s1", "capabilities": caps}))
+        }
         ("DELETE", ["session", "s1"]) => reply(Value::Null),
         ("POST", ["session", "s1", "url"]) => {
             st.url = req["url"].as_str().unwrap_or("").to_string();
@@ -1020,5 +1057,247 @@ fn debug_true_then_false_traces_without_failing_the_dispatch() {
         c(&req(false).to_string()).as_ptr(),
     ));
     assert_eq!(r["status"], "passed");
+    drop_instance(handle);
+}
+
+// ---- Task 11 tests ----
+
+const DUMP_CONSOLE: u32 = 26;
+const DUMP_NETWORK: u32 = 27;
+const READ_STATUS: u32 = 28;
+const NO_CONSOLE_ERRORS: u32 = 29;
+const SENT_REQUEST: u32 = 30;
+const LAST_STATUS: u32 = 31;
+
+fn console_event(level: &str, text: &str) -> Value {
+    json!({"type": "event", "method": "log.entryAdded", "params": {"type": "console", "level": level, "text": text, "timestamp": 1}})
+}
+
+fn request_event(id: &str, method: &str, url: &str) -> Value {
+    json!({"type": "event", "method": "network.beforeRequestSent", "params": {"timestamp": 1, "request": {"request": id, "method": method, "url": url, "headers": []}}})
+}
+
+fn response_event(id: &str, status: u16) -> Value {
+    json!({"type": "event", "method": "network.responseCompleted", "params": {"timestamp": 2, "request": {"request": id}, "response": {"status": status, "headers": []}}})
+}
+
+/// Events arrive on another thread; an assertion answers `not_yet` until
+/// they have — exactly what the host's polling would do.
+fn eventually_passes(handle: u64, index: u32, args: &[&str], dir: &Path) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let r = dispatch(handle, index, args, None, dir);
+        if r["status"] == "passed" || std::time::Instant::now() > deadline {
+            return r;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn without_bidi_the_console_and_network_steps_fail_naming_the_capability() {
+    let _guard = serial();
+    let stub = start_stub(StubState::default());
+    let handle = init(&stub, json!({"on_failure": "none"}));
+    let dir = artifacts();
+    for index in [DUMP_CONSOLE, DUMP_NETWORK, NO_CONSOLE_ERRORS] {
+        let r = dispatch(handle, index, &[], None, dir.path());
+        assert_eq!(r["status"], "fatal", "{index}");
+        assert!(
+            r["error"].as_str().expect("error").contains("webSocketUrl"),
+            "{r}"
+        );
+    }
+    drop_instance(handle);
+}
+
+#[test]
+fn console_errors_including_uncaught_exceptions_are_fatal_with_the_entries() {
+    let _guard = serial();
+    let stub = start_stub(StubState {
+        bidi: true,
+        events: vec![
+            console_event("info", "fine"),
+            console_event("error", "boom: the widget failed"),
+            json!({"type": "event", "method": "log.entryAdded", "params": {"type": "javascript", "level": "error", "text": "Error: uncaught", "timestamp": 3}}),
+        ],
+        ..Default::default()
+    });
+    let handle = init(&stub, json!({"on_failure": "console"}));
+    let dir = artifacts();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let r = dispatch(handle, NO_CONSOLE_ERRORS, &[], None, dir.path());
+    assert_eq!(r["status"], "fatal", "errors never disappear: {r}");
+    assert!(
+        r["error"].as_str().expect("error").contains("2 error"),
+        "{r}"
+    );
+    let console = r["diagnostics"]
+        .as_array()
+        .expect("d")
+        .iter()
+        .find(|d| d["title"] == "Console")
+        .expect("console evidence");
+    assert!(
+        console["content"]
+            .as_str()
+            .expect("content")
+            .contains("boom: the widget failed")
+    );
+    drop_instance(handle);
+}
+
+#[test]
+fn network_assertions_match_method_and_path_prefix_and_read_the_status() {
+    let _guard = serial();
+    let stub = start_stub(StubState {
+        bidi: true,
+        events: vec![
+            request_event("r1", "GET", "http://app.test/orders/new"),
+            request_event("r2", "POST", "http://app.test/api/orders?x=1"),
+            response_event("r2", 201),
+        ],
+        ..Default::default()
+    });
+    let handle = init(&stub, json!({"on_failure": "none"}));
+    let dir = artifacts();
+    assert_eq!(
+        eventually_passes(handle, SENT_REQUEST, &["POST", "/api/orders"], dir.path())["status"],
+        "passed"
+    );
+    assert_eq!(
+        dispatch(
+            handle,
+            SENT_REQUEST,
+            &["DELETE", "/api/orders"],
+            None,
+            dir.path()
+        )["status"],
+        "not_yet"
+    );
+    assert_eq!(
+        dispatch(handle, SENT_REQUEST, &["GET", "/api"], None, dir.path())["status"],
+        "not_yet",
+        "prefix on the path, method exact"
+    );
+    assert_eq!(
+        dispatch(
+            handle,
+            LAST_STATUS,
+            &["/api/orders", "201"],
+            None,
+            dir.path()
+        )["status"],
+        "passed"
+    );
+    assert_eq!(
+        dispatch(
+            handle,
+            LAST_STATUS,
+            &["/api/orders", "200"],
+            None,
+            dir.path()
+        )["status"],
+        "not_yet"
+    );
+    assert_eq!(
+        dispatch(
+            handle,
+            LAST_STATUS,
+            &["/orders/new", "200"],
+            None,
+            dir.path()
+        )["status"],
+        "not_yet",
+        "no response yet"
+    );
+    let r = dispatch(
+        handle,
+        READ_STATUS,
+        &["/api/orders", "code"],
+        None,
+        dir.path(),
+    );
+    assert_eq!(r["vars"]["code"], "201");
+    let none = dispatch(handle, READ_STATUS, &["/nope", "code"], None, dir.path());
+    assert_eq!(none["status"], "fatal");
+    assert_eq!(
+        dispatch(handle, NO_CONSOLE_ERRORS, &[], None, dir.path())["status"],
+        "passed"
+    );
+    drop_instance(handle);
+}
+
+#[test]
+fn dumps_write_json_files_and_a_reset_empties_the_buffers() {
+    let _guard = serial();
+    let stub = start_stub(StubState {
+        bidi: true,
+        events: vec![
+            console_event("warn", "w"),
+            request_event("r1", "GET", "http://app.test/x"),
+        ],
+        ..Default::default()
+    });
+    let handle = init(&stub, json!({"on_failure": "none"}));
+    let dir = artifacts();
+    assert_eq!(
+        eventually_passes(handle, SENT_REQUEST, &["GET", "/x"], dir.path())["status"],
+        "passed"
+    );
+    let target = dir.path().join("000009");
+    assert_eq!(
+        dispatch(handle, DUMP_CONSOLE, &[], None, &target)["status"],
+        "passed"
+    );
+    assert_eq!(
+        dispatch(handle, DUMP_NETWORK, &[], None, &target)["status"],
+        "passed"
+    );
+    let console: Value =
+        serde_json::from_slice(&std::fs::read(target.join("console.json")).expect("console.json"))
+            .expect("json");
+    assert_eq!(console[0]["text"], "w");
+    let network: Value =
+        serde_json::from_slice(&std::fs::read(target.join("network.json")).expect("network.json"))
+            .expect("json");
+    assert_eq!(network[0]["url"], "http://app.test/x");
+    assert_eq!(reset(handle)["ok"], true);
+    assert_eq!(
+        dispatch(handle, SENT_REQUEST, &["GET", "/x"], None, dir.path())["status"],
+        "not_yet",
+        "the reset emptied the network log"
+    );
+    drop_instance(handle);
+}
+
+#[test]
+fn a_failure_attaches_console_and_network_when_on_failure_asks() {
+    let _guard = serial();
+    let stub = start_stub(StubState {
+        bidi: true,
+        events: vec![
+            console_event("error", "e"),
+            request_event("r1", "GET", "http://app.test/x"),
+        ],
+        ..Default::default()
+    });
+    let handle = init(
+        &stub,
+        json!({"find_timeout_secs": 0, "on_failure": "console,network"}),
+    );
+    let dir = artifacts();
+    assert_eq!(
+        eventually_passes(handle, SENT_REQUEST, &["GET", "/x"], dir.path())["status"],
+        "passed"
+    );
+    let r = dispatch(handle, PRESS, &["Pay"], None, dir.path());
+    let titles: Vec<&str> = r["diagnostics"]
+        .as_array()
+        .expect("d")
+        .iter()
+        .map(|x| x["title"].as_str().expect("t"))
+        .collect();
+    assert_eq!(titles, vec!["Page", "Console", "Network", "WebDriver"]);
     drop_instance(handle);
 }
