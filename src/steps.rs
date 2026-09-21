@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! The step table and the dispatch on its index — kept adjacent so they
 //! cannot drift. The index of a step in `STEPS` is its identity.
 
@@ -225,6 +223,7 @@ impl From<crate::webdriver::Error> for Fail {
 }
 
 pub fn route(instance: &Instance, index: u32, req: &Request) -> String {
+    instance.session.driver.set_debug(req.ctx.debug);
     if req
         .args
         .iter()
@@ -369,6 +368,20 @@ fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Val
             }
             act(instance, &find::field(&arg(1)))?.send_keys(&path.display().to_string())?;
         }
+        10 | 11 => {
+            let js = if index == 10 {
+                arg(0)
+            } else {
+                req.docstring
+                    .clone()
+                    .ok_or_else(|| fatal("`I execute the script:` needs a doc string"))?
+            };
+            let result = s.execute(&js, vec![])?;
+            vars.insert(
+                "script_result".to_string(),
+                Value::String(scalar_text(&result)),
+            );
+        }
         12 => {
             let text = act(instance, &find::selector(&arg(0)))?.text()?;
             vars.insert(arg(1), Value::String(text.trim().to_string()));
@@ -378,6 +391,13 @@ fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Val
                 .attribute(&arg(0))?
                 .ok_or_else(|| fatal(format!("the element has no attribute {:?}", arg(0))))?;
             vars.insert(arg(2), Value::String(value));
+        }
+        14 => {
+            let png = s.screenshot()?;
+            let path = write_artifact(&req.ctx, "screenshot.png", &png)?;
+            if req.ctx.debug {
+                eprintln!("[browser] screenshot: {}", path.display());
+            }
         }
         15 => {
             let raw = s.current_url()?;
@@ -473,7 +493,7 @@ fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Val
                 return Err(not_yet(format!("{} is {state}", lookup.what)));
             }
         }
-        other => return Err(fatal(format!("step {other} is not implemented yet"))),
+        other => return Err(fatal(format!("unknown step index {other}"))),
     }
     Ok(vars)
 }

@@ -4,7 +4,6 @@
 use serde_json::{Value, json};
 
 /// The per-dispatch context the host hands over with every step.
-#[allow(dead_code)]
 pub struct Ctx {
     pub artifacts_dir: String,
     pub workspace_dir: String,
@@ -14,7 +13,6 @@ pub struct Ctx {
 /// One piece of evidence in a failure dump. `kind` is what the host renders
 /// in the `--- <title> (<kind>) ---` header; `text`, `json`, `http` and
 /// `image` are the conventional values.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub title: String,
@@ -23,7 +21,6 @@ pub struct Diagnostic {
     pub path: Option<String>,
 }
 
-#[allow(dead_code)]
 impl Diagnostic {
     pub fn text(title: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
@@ -43,6 +40,9 @@ impl Diagnostic {
         }
     }
 
+    /// Unused until the BiDi console/network capture (a later task) feeds
+    /// `on_failure.console`/`.network` into a diagnostic.
+    #[allow(dead_code)]
     pub fn json(title: impl Into<String>, value: &Value) -> Self {
         let rendered = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
         Self {
@@ -72,7 +72,6 @@ impl Diagnostic {
     }
 }
 
-#[allow(dead_code)]
 fn diagnostics_json(diagnostics: &[Diagnostic]) -> Value {
     Value::Array(diagnostics.iter().map(Diagnostic::to_json).collect())
 }
@@ -86,12 +85,10 @@ pub fn err(error: impl Into<String>) -> String {
     json!({"ok": false, "error": error.into()}).to_string()
 }
 
-#[allow(dead_code)]
 pub fn passed() -> String {
     r#"{"status":"passed"}"#.to_string()
 }
 
-#[allow(dead_code)]
 pub fn passed_with(vars: Value) -> String {
     json!({"status": "passed", "vars": vars}).to_string()
 }
@@ -99,14 +96,12 @@ pub fn passed_with(vars: Value) -> String {
 /// One fresh observation says the condition is not met yet. Only an
 /// assertion may answer this; without an armed eventual assertion the host
 /// treats it as a failure, so the message says what was observed.
-#[allow(dead_code)]
 pub fn not_yet(error: &str, diagnostics: &[Diagnostic]) -> String {
     json!({"status": "not_yet", "error": error, "diagnostics": diagnostics_json(diagnostics)})
         .to_string()
 }
 
 /// The observation itself failed; retrying cannot help.
-#[allow(dead_code)]
 pub fn fatal(error: &str, diagnostics: &[Diagnostic]) -> String {
     json!({"status": "fatal", "error": error, "diagnostics": diagnostics_json(diagnostics)})
         .to_string()

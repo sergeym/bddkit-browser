@@ -2,8 +2,6 @@
 //! Every lookup is a list of strategies tried in order; the first non-empty
 //! answer wins. No JavaScript — everything goes through WebDriver `find`.
 
-#![allow(dead_code)]
-
 use std::time::{Duration, Instant};
 
 use crate::webdriver::{Element, Error, Session, Strategy};

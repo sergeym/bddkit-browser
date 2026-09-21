@@ -10,9 +10,6 @@ pub struct Instance {
     pub config: InstanceConfig,
     pub session: Session,
     pub info: SessionInfo,
-    /// Read by `I am in debug mode` / `I am not in debug mode`, added later.
-    #[allow(dead_code)]
-    pub debug: bool,
 }
 
 /// Storage is cleared while the page is still on the application's origin:
@@ -23,6 +20,8 @@ const CLEAR_STORAGE: &str =
     "try { window.localStorage.clear(); window.sessionStorage.clear(); } catch (e) {}";
 
 impl Instance {
+    /// `debug` seeds the driver's initial trace state only; every dispatch
+    /// afterward follows the request through `Driver::set_debug`.
     pub fn open(config: InstanceConfig, debug: bool) -> Result<Self, String> {
         let Mode::Remote { url } = &config.mode;
         let driver = Arc::new(Driver::new(url.clone(), debug));
@@ -38,7 +37,6 @@ impl Instance {
             config,
             session,
             info,
-            debug,
         };
         let (w, h) = instance.config.window;
         if let Err(e) = instance.session.set_window_rect(w, h) {

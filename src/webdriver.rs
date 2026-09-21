@@ -1,9 +1,8 @@
-#![allow(dead_code)]
-
 //! WebDriver classic over blocking HTTP. Knows endpoints and the wire shape,
 //! nothing about Mink or steps; `bddkit-appium` takes this module as is.
 
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -100,13 +99,15 @@ pub struct Driver {
     agent: ureq::Agent,
     base: Url,
     last: Mutex<Option<Exchange>>,
-    debug: bool,
+    debug: AtomicBool,
 }
 
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
     pub browser_name: String,
     pub browser_version: String,
+    /// Unused until the BiDi client (`bidi.rs`, a later task) dials it.
+    #[allow(dead_code)]
     pub websocket_url: Option<String>,
 }
 
@@ -137,8 +138,14 @@ impl Driver {
             agent: config.new_agent(),
             base,
             last: Mutex::new(None),
-            debug,
+            debug: AtomicBool::new(debug),
         }
+    }
+
+    /// `debug` follows the request, not the init: `steps::route` calls this
+    /// on every dispatch before running the step.
+    pub fn set_debug(&self, on: bool) {
+        self.debug.store(on, Ordering::Relaxed);
     }
 
     fn endpoint(&self, path: &str) -> Url {
@@ -214,7 +221,7 @@ impl Driver {
             .body_mut()
             .read_to_string()
             .map_err(|e| Error::Transport(format!("{method} {url}: reading the reply: {e}")))?;
-        if self.debug {
+        if self.debug.load(Ordering::Relaxed) {
             eprintln!("[browser] {method} /{path} {status}");
         }
         self.record(Exchange {
@@ -226,6 +233,9 @@ impl Driver {
         Self::decode(method, path, status, &text)
     }
 
+    /// Unused until managed mode (`Mode::Managed`, a later task) probes the
+    /// driver before a session exists.
+    #[allow(dead_code)]
     pub fn status(&self) -> Result<Value, Error> {
         self.call("GET", "status", None)
     }
@@ -429,6 +439,14 @@ mod tests {
         assert_eq!(ok, serde_json::json!("Hi"));
         let bad = Driver::decode("GET", "status", 200, "<html>").expect_err("HTML is not a reply");
         assert!(matches!(bad, Error::Transport(_)));
+    }
+
+    #[test]
+    fn set_debug_toggles_what_call_reads() {
+        let d = Driver::new(Url::parse("http://h:4444").expect("url"), false);
+        assert!(!d.debug.load(Ordering::Relaxed));
+        d.set_debug(true);
+        assert!(d.debug.load(Ordering::Relaxed));
     }
 
     #[test]
