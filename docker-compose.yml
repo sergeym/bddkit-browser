@@ -1,0 +1,16 @@
+services:
+  # Remote mode for the example and the e2e suite. Host networking so the
+  # browser reaches the demo site on localhost:3000; on Docker Desktop use
+  # host.docker.internal instead (see examples/README.md).
+  chrome:
+    image: selenium/standalone-chrome:4.27.0
+    network_mode: host
+    shm_size: 2g
+    environment:
+      SE_NODE_MAX_SESSIONS: 4
+      SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4444/status"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
