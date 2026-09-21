@@ -1,4 +1,5 @@
-Apache License
+
+                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
 
@@ -28,9 +29,9 @@ Apache License
       source, and configuration files.
 
       "Object" form shall mean any form resulting from mechanical
-      transformation of a Source form, including but not limited to
-      compiled object code, generated documentation, and conversions
-      to other media types.
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
 
       "Work" shall mean the work of authorship, whether in Source or
       Object form, made available under the License, as indicated by a
@@ -82,7 +83,7 @@ Apache License
       institute patent litigation against any entity (including a
       cross-claim or counterclaim in a lawsuit) alleging that the Work
       or a Contribution incorporated within the Work constitutes direct
-      or contributory patent patent infringement, then any patent licenses
+      or contributory patent infringement, then any patent licenses
       granted to You under this License for that Work shall terminate
       as of the date such litigation is filed.
 
@@ -98,7 +99,7 @@ Apache License
           stating that You changed the files; and
 
       (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, trademark, and
+          that You distribute, all copyright, patent, trademark, and
           attribution notices from the Source form of the Work,
           excluding those notices that do not pertain to any part of
           the Derivative Works; and
