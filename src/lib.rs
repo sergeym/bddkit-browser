@@ -2,6 +2,7 @@
 //! over WebDriver — classic HTTP for commands, BiDi for events. Written
 //! against docs/plugin-authoring.md; it must never need the host's source.
 
+mod bidi;
 mod config;
 mod find;
 mod instance;
