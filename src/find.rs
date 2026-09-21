@@ -32,10 +32,11 @@ pub fn selector(raw: &str) -> Lookup {
     let strategy = if let Some(xpath) = raw.strip_prefix("xpath=") {
         (Strategy::XPath, xpath.to_string())
     } else if let Some(text) = raw.strip_prefix("text=") {
+        // Scoped to the body so `<title>` can never win.
         (
             Strategy::XPath,
             format!(
-                "//*[text()[contains(normalize-space(.), {})]]",
+                "//body//*[text()[contains(normalize-space(.), {})]]",
                 xpath_literal(text)
             ),
         )
@@ -188,7 +189,7 @@ mod tests {
         assert!(
             by_text.strategies[0]
                 .1
-                .contains("text()[contains(normalize-space(.), 'Pay now')]")
+                .starts_with("//body//*[text()[contains(normalize-space(.), 'Pay now')]]")
         );
     }
 
