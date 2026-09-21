@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports, unused_mut)]
+#![allow(dead_code)]
 
 //! The step table and the dispatch on its index — kept adjacent so they
 //! cannot drift. The index of a step in `STEPS` is its identity.
@@ -12,7 +12,7 @@ use crate::config::InstanceConfig;
 use crate::find::{self, Lookup};
 use crate::instance::Instance;
 use crate::reply::{self, Ctx, Diagnostic};
-use crate::webdriver::{Element, Strategy};
+use crate::webdriver::Element;
 
 pub struct Step {
     pub pattern: &'static str,
@@ -335,7 +335,7 @@ fn look<'a>(instance: &'a Instance, lookup: &Lookup) -> Result<Option<Element<'a
 fn run(instance: &Instance, index: u32, req: &Request) -> Result<Map<String, Value>, Fail> {
     let s = &instance.session;
     let arg = |n: usize| req.args.get(n).cloned().unwrap_or_default();
-    let mut vars = Map::new();
+    let vars = Map::new();
     match index {
         0 => s.navigate(resolve_url(&instance.config, &arg(0))?.as_str())?,
         1 => s.refresh()?,
