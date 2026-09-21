@@ -2,6 +2,7 @@
 //! over WebDriver — classic HTTP for commands, BiDi for events. Written
 //! against docs/plugin-authoring.md; it must never need the host's source.
 
+mod config;
 mod reply;
 
 use std::ffi::{CStr, CString, c_char};
@@ -48,6 +49,7 @@ pub fn manifest_json() -> String {
         // One browser per feature file, reset per scenario: per-scenario state
         // means per_worker, by the contract's own rule.
         "concurrency": "per_worker",
+        "fields": { "browser": config::fields_json() },
     })
     .to_string()
 }
@@ -69,6 +71,23 @@ pub unsafe extern "C" fn bddkit_free_string(s: *mut c_char) {
     if !s.is_null() {
         drop(unsafe { CString::from_raw(s) });
     }
+}
+
+/// Eager, at startup, for every declared instance, with nothing connected.
+/// Rejecting here is what turns a config typo into exit 2 before the first
+/// request instead of a failure halfway through the suite.
+#[unsafe(no_mangle)]
+pub extern "C" fn bddkit_validate_config(request: *const c_char) -> *mut c_char {
+    guard("envelope", move || {
+        let value: serde_json::Value = match serde_json::from_str(&input(request)) {
+            Ok(v) => v,
+            Err(e) => return reply::err(e.to_string()),
+        };
+        match config::InstanceConfig::parse(&value["config"]) {
+            Ok(_) => reply::ok(),
+            Err(error) => reply::err(error),
+        }
+    })
 }
 
 #[cfg(test)]
