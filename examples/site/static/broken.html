@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Broken — bddkit demo</title></head>
+<body>
+<h1>This page logs an error</h1>
+<script>
+  console.error('boom: the widget failed to load');
+  setTimeout(() => { throw new Error('uncaught in the widget'); }, 0);
+</script>
+</body>
+</html>

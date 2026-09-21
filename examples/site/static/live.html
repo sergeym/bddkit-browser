@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Live — bddkit demo</title></head>
+<body>
+<h1>Live</h1>
+<p>Room for the WebSocket steps of a later version: this page opens a socket to <code>/ws</code> and shows what comes back.</p>
+<ul id="messages"></ul>
+<script>
+  const socket = new WebSocket(`ws://${location.host}/ws`);
+  socket.addEventListener('open', () => socket.send('hello'));
+  socket.addEventListener('message', (e) => {
+    const li = document.createElement('li');
+    li.textContent = e.data;
+    document.getElementById('messages').appendChild(li);
+  });
+</script>
+</body>
+</html>

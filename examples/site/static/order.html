@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>New order — bddkit demo</title></head>
+<body>
+<h1>New order</h1>
+<p>One widget, 9.99.</p>
+<button id="pay" type="button">Pay</button>
+<p id="result" hidden>Paid. Order <span data-test="order-id"></span></p>
+<a href="/dashboard">Dashboard</a>
+<script>
+  document.getElementById('pay').addEventListener('click', async () => {
+    const response = await fetch('/api/orders', { method: 'POST' });
+    const order = await response.json();
+    document.querySelector('[data-test=order-id]').textContent = order.id;
+    document.getElementById('result').hidden = false;
+  });
+</script>
+</body>
+</html>

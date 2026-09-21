@@ -1,0 +1,15 @@
+# The demo suite: a browser in a Selenium container drives the site from
+# `cargo run --example site`, and the host's own HTTP steps read its API.
+paths: [features]
+concurrency: 1
+resources:
+  api:
+    site:
+      base_url: http://localhost:3000
+  browser:
+    chrome:
+      browser: chrome
+      url: http://localhost:4444        # docker compose up -d
+      base_url: http://localhost:3000   # cargo run --example site
+      # headless: false                 # put this in browser.local.yaml to watch
+default_browser: chrome

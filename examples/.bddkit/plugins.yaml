@@ -1,0 +1,3 @@
+plugin:
+  - name: browser
+    path: ../../target/release/libbddkit_browser.so

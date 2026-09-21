@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Profile — bddkit demo</title></head>
+<body>
+<h1>Profile</h1>
+<form method="post" action="/profile">
+  <label for="country">Country</label>
+  <select id="country" name="country">
+    <option value="">— pick one —</option>
+    <option value="lv">Latvia</option>
+    <option value="ee">Estonia</option>
+  </select>
+  <label><input type="checkbox" name="newsletter" value="1"> Newsletter</label>
+  <label for="bio">About you</label>
+  <textarea id="bio" name="bio" placeholder="A line or two"></textarea>
+  <label for="avatar">Avatar</label>
+  <input id="avatar" type="file">
+  <p data-test="avatar-name"></p>
+  <button type="submit">Save</button>
+</form>
+<script>
+  document.getElementById('avatar').addEventListener('change', (e) => {
+    document.querySelector('[data-test=avatar-name]').textContent = e.target.files[0] ? e.target.files[0].name : '';
+  });
+</script>
+</body>
+</html>
