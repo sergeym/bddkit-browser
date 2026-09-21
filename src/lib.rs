@@ -20,7 +20,6 @@ fn out(s: String) -> *mut c_char {
 }
 
 /// Inside `guard` at every call site.
-#[allow(dead_code)]
 fn input(p: *const c_char) -> String {
     if p.is_null() {
         return String::new();

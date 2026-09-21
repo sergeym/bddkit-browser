@@ -57,7 +57,6 @@ impl Browser {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum Mode {
-    #[allow(dead_code)]
     Remote { url: Url },
 }
 
@@ -97,22 +96,14 @@ impl OnFailure {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct InstanceConfig {
-    #[allow(dead_code)]
     pub browser: Browser,
-    #[allow(dead_code)]
     pub mode: Mode,
-    #[allow(dead_code)]
     pub base_url: Option<Url>,
-    #[allow(dead_code)]
     pub headless: bool,
-    #[allow(dead_code)]
     pub window: (u32, u32),
-    #[allow(dead_code)]
     pub find_timeout: Duration,
-    #[allow(dead_code)]
     pub on_failure: OnFailure,
     /// Raw passthrough, merged last over what the plugin builds.
-    #[allow(dead_code)]
     pub capabilities: Value,
 }
 
@@ -295,9 +286,12 @@ impl InstanceConfig {
         };
         let find_timeout = match config.get("find_timeout_secs") {
             None | Some(Value::Null) => Duration::from_secs(5),
-            Some(Value::Number(n)) if n.as_u64().is_some() => {
-                Duration::from_secs(n.as_u64().unwrap_or(0))
-            }
+            Some(Value::Number(n)) => match n.as_u64() {
+                Some(secs) => Duration::from_secs(secs),
+                None => {
+                    return Err("\"find_timeout_secs\" must be a non-negative integer".to_string());
+                }
+            },
             Some(other) => {
                 return Err(format!(
                     "\"find_timeout_secs\" must be a non-negative integer, got {other}"

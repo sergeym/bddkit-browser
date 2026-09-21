@@ -78,12 +78,10 @@ fn diagnostics_json(diagnostics: &[Diagnostic]) -> Value {
 }
 
 /// The envelope shared by validate / init / drop / reset / probe.
-#[allow(dead_code)]
 pub fn ok() -> String {
     r#"{"ok":true}"#.to_string()
 }
 
-#[allow(dead_code)]
 pub fn err(error: impl Into<String>) -> String {
     json!({"ok": false, "error": error.into()}).to_string()
 }
