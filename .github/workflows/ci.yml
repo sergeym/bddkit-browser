@@ -63,7 +63,7 @@ jobs:
       # touching this if it ever needs a second platform.
       - name: Fetch Selenium Manager
         run: |
-          curl -sSL -o /usr/local/bin/selenium-manager \
+          curl -fsSL -o /usr/local/bin/selenium-manager \
             https://github.com/SeleniumHQ/selenium_manager_artifacts/releases/latest/download/selenium-manager-linux-x86_64
           chmod +x /usr/local/bin/selenium-manager
           selenium-manager --version
