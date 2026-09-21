@@ -51,8 +51,6 @@ impl Browser {
     }
 
     /// What `selenium-manager --browser` takes.
-    // Task 14 invokes Selenium Manager and reads this; unused outside tests until then.
-    #[allow(dead_code)]
     pub fn manager_name(self) -> &'static str {
         match self {
             Self::Chrome => "chrome",
@@ -63,9 +61,7 @@ impl Browser {
 }
 
 /// Managed mode: the plugin brings the browser via Selenium Manager.
-/// Task 14 reads these fields to invoke it; unused outside tests until then.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Managed {
     pub version: String,
     pub browser_path: Option<PathBuf>,

@@ -6,6 +6,8 @@ mod bidi;
 mod config;
 mod find;
 mod instance;
+#[cfg(unix)]
+mod managed;
 mod reply;
 mod steps;
 mod webdriver;
