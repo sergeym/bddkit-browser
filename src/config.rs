@@ -74,11 +74,7 @@ pub struct Managed {
 /// Where the browser comes from.
 #[derive(Debug, Clone)]
 pub enum Mode {
-    Remote {
-        url: Url,
-    },
-    // Task 15 reads the payload when it wires managed mode into `Instance::open`.
-    #[allow(dead_code)]
+    Remote { url: Url },
     Managed(Managed),
 }
 

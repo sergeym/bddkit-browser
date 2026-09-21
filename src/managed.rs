@@ -2,10 +2,6 @@
 //! driver that matches it; the plugin starts that driver on a free port and
 //! kills it with the instance. Unix only in v1.
 
-// Task 15 wires this module into `instance::Instance::open`; until then
-// nothing outside its own tests calls in, so clippy sees it as dead code.
-#![allow(dead_code)]
-
 use std::ffi::CStr;
 use std::net::TcpListener;
 use std::os::unix::process::CommandExt;

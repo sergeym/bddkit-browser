@@ -231,9 +231,7 @@ impl Driver {
         Self::decode(method, path, status, &text)
     }
 
-    /// Unused until managed mode (`Mode::Managed`, a later task) probes the
-    /// driver before a session exists.
-    #[allow(dead_code)]
+    /// Managed mode probes the driver with this before a session exists.
     pub fn status(&self) -> Result<Value, Error> {
         self.call("GET", "status", None)
     }

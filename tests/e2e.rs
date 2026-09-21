@@ -14,6 +14,10 @@ fn browser_url() -> String {
     std::env::var("BDDKIT_BROWSER_URL").unwrap_or_else(|_| "http://localhost:4444".to_string())
 }
 
+fn managed_wanted() -> bool {
+    std::env::var("BDDKIT_BROWSER_MANAGED").is_ok_and(|v| v == "1")
+}
+
 fn browser_is_up() -> bool {
     ureq::get(format!("{}/status", browser_url()))
         .call()
@@ -117,9 +121,9 @@ fn start_site() -> Site {
     Site { child, port }
 }
 
-/// A throwaway project pointing at the site and the browser. Each name in
-/// `files` is copied in from `from`.
-fn project(name: &str, site: &Site, from: &Path, files: &[&str]) -> PathBuf {
+/// The directory, plugin lock and copied feature files shared by every
+/// throwaway project; the caller finishes it off with `write_config`.
+fn setup_project(name: &str, from: &Path, files: &[&str]) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("bddkit-browser-e2e-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -136,15 +140,41 @@ fn project(name: &str, site: &Site, from: &Path, files: &[&str]) -> PathBuf {
         ),
     )
     .expect("lock");
-    let site_url = format!("http://localhost:{}", site.port);
+    dir
+}
+
+/// Writes `cfg.yaml`: the shared `api` resource plus `browser_block` (the
+/// whole `resources.browser` section, indented two spaces, one instance).
+fn write_config(dir: &Path, site_url: &str, browser_block: &str) {
     std::fs::write(
         dir.join("cfg.yaml"),
         format!(
-            "paths: [features]\nconcurrency: 1\nresources:\n  api:\n    site:\n      base_url: {site_url}\n  browser:\n    chrome:\n      browser: chrome\n      url: {}\n      base_url: {site_url}\n",
-            browser_url()
+            "paths: [features]\nconcurrency: 1\nresources:\n  api:\n    site:\n      base_url: {site_url}\n{browser_block}"
         ),
     )
     .expect("config");
+}
+
+/// A throwaway project pointing at the site and a remote Chrome. Each name
+/// in `files` is copied in from `from`.
+fn project(name: &str, site: &Site, from: &Path, files: &[&str]) -> PathBuf {
+    let dir = setup_project(name, from, files);
+    let site_url = format!("http://localhost:{}", site.port);
+    let browser_block = format!(
+        "  browser:\n    chrome:\n      browser: chrome\n      url: {}\n      base_url: {site_url}\n",
+        browser_url()
+    );
+    write_config(&dir, &site_url, &browser_block);
+    dir
+}
+
+/// A throwaway project with no `url`: managed mode brings its own Firefox.
+fn project_managed(name: &str, site: &Site, from: &Path, files: &[&str]) -> PathBuf {
+    let dir = setup_project(name, from, files);
+    let site_url = format!("http://localhost:{}", site.port);
+    let browser_block =
+        format!("  browser:\n    firefox:\n      browser: firefox\n      base_url: {site_url}\n");
+    write_config(&dir, &site_url, &browser_block);
     dir
 }
 
@@ -257,5 +287,36 @@ fn doctor_live_probes_the_browser() {
     assert!(
         stdout.contains("plugin browser.chrome") && stdout.contains("probed clean"),
         "{stdout}"
+    );
+}
+
+/// Managed mode downloads its own Firefox and geckodriver through Selenium
+/// Manager (cold cache: hundreds of MB, several minutes) — opt in with
+/// `BDDKIT_BROWSER_MANAGED=1`, and point `BDDKIT_SELENIUM_MANAGER` at the
+/// manager binary if it is not already on `PATH` or beside the plugin.
+#[test]
+fn the_examples_pass_on_a_managed_firefox() {
+    let Some(bin) = bddkit_bin() else {
+        eprintln!(
+            "SKIP: no bddkit binary — set BDDKIT_BIN, put bddkit on PATH, or build ../bddkit"
+        );
+        return;
+    };
+    if !managed_wanted() {
+        eprintln!(
+            "SKIP: set BDDKIT_BROWSER_MANAGED=1 to run the managed Firefox suite (downloads Firefox into ~/.cache/bddkit on a cold cache)"
+        );
+        return;
+    }
+    let site = start_site();
+    let names = feature_names(&examples());
+    let files: Vec<&str> = names.iter().map(String::as_str).collect();
+    let dir = project_managed("managed", &site, &examples(), &files);
+    let out = run(&bin, &dir);
+    assert!(
+        out.status.success(),
+        "managed firefox failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
 }

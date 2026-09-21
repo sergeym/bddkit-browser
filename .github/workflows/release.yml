@@ -130,6 +130,17 @@ jobs:
           mkdir -p "dist/$name"
           cp "target/$TARGET/release/$library" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
+          # Real asset names on the selenium_manager_artifacts releases page:
+          # selenium-manager-linux-x86_64 / -linux-arm64 / -macos / -windows.exe.
+          case "$TARGET" in
+            x86_64-unknown-linux-gnu)  sm="selenium-manager-linux-x86_64" ;;
+            aarch64-unknown-linux-gnu) sm="selenium-manager-linux-arm64" ;;
+            x86_64-apple-darwin|aarch64-apple-darwin) sm="selenium-manager-macos" ;;
+            *) echo "no selenium-manager asset mapped for $TARGET" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o "dist/$name/selenium-manager" \
+            "https://github.com/SeleniumHQ/selenium_manager_artifacts/releases/latest/download/$sm"
+          chmod +x "dist/$name/selenium-manager"
           tar -C dist -czf "$name.tar.gz" "$name"
           if command -v sha256sum >/dev/null; then
             sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
@@ -146,6 +157,9 @@ jobs:
           New-Item -ItemType Directory -Path "dist/$name" -Force | Out-Null
           Copy-Item "target/$env:TARGET/release/bddkit_browser.dll" "dist/$name/"
           Copy-Item README.md, LICENSE "dist/$name/"
+          # managed mode itself stays Unix-only; the binary rides along for
+          # when it is not.
+          Invoke-WebRequest -Uri "https://github.com/SeleniumHQ/selenium_manager_artifacts/releases/latest/download/selenium-manager-windows.exe" -OutFile "dist/$name/selenium-manager.exe"
           Compress-Archive -Path "dist/$name" -DestinationPath "$name.zip"
           $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"

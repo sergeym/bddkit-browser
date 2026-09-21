@@ -29,7 +29,23 @@ resources:
       headless: false
 ```
 
-A visible window needs a browser on your own machine rather than in the container: see the managed mode section of the top-level README once it lands.
+A visible window needs a browser on your own machine rather than in the container: see the Managed mode section below, and set `headless: false` on the `firefox` instance instead of `chrome`.
+
+## Managed mode
+
+`browser.yaml` also declares a `firefox` instance with no `url`: managed mode, where the plugin brings its own browser through [Selenium Manager](https://github.com/SeleniumHQ/selenium_manager_artifacts) instead of talking to the container. Switch to it in `examples/browser.local.yaml` (gitignored, merges over `browser.yaml`):
+
+```yaml
+default_browser: firefox
+```
+
+Then run without the container:
+
+```bash
+BDDKIT_SELENIUM_MANAGER=/path/to/selenium-manager bddkit run --config examples/browser.yaml
+```
+
+The first run downloads Firefox and geckodriver — hundreds of megabytes, once — into `~/.cache/bddkit/plugins/browser`; later runs reuse that cache and start in seconds. `BDDKIT_SELENIUM_MANAGER` is a development override, for pointing at a `selenium-manager` binary you already have; the normal source is a release archive of this plugin, which carries `selenium-manager` beside `libbddkit_browser.so`, so a plain install needs no extra download step. Without either, the plugin also looks for `selenium-manager` on `PATH`. Building or fetching it yourself: grab the asset for your platform from the [selenium_manager_artifacts releases page](https://github.com/SeleniumHQ/selenium_manager_artifacts/releases/latest).
 
 ## Seeing a failure dump
 

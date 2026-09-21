@@ -30,12 +30,15 @@ plugin:
 
 ## Configuring an instance
 
-Declare one or more named instances under `resources.browser` in the ordinary `bddkit` config. Phase 1 is remote mode only — the browser lives in a Selenium Grid or a `selenium/standalone-*` container you point `url` at:
+Declare one or more named instances under `resources.browser` in the ordinary `bddkit` config. Two modes, chosen by whether `url` is set:
+
+- **Remote mode** — the browser already runs somewhere else: a Selenium Grid, a `selenium/standalone-*` container, a vendor cloud. Point `url` at it.
+- **Managed mode** — omit `url` and the plugin brings its own browser and matching driver through [Selenium Manager](https://github.com/SeleniumHQ/selenium_manager_artifacts) (the same tool Selenium's own language bindings use), starts the driver itself on a free port, and stops it when the instance closes. Unix only.
 
 ```yaml
 resources:
   browser:
-    chrome:
+    chrome:                            # remote mode
       browser: chrome
       url: http://localhost:4444
       base_url: http://localhost:3000
@@ -45,13 +48,29 @@ resources:
       # find_timeout_secs: 5             (default; 0 disables the wait)
       # on_failure: screenshot,console   (default: screenshot,console,network; "none" writes nothing)
       # capabilities: {}                 (raw WebDriver capabilities merged on top of what the plugin builds)
+    firefox:                           # managed mode: no url
+      browser: firefox
+      base_url: http://localhost:3000
+      # optional, managed mode only:
+      # version: stable                  (default; also beta, nightly, esr, or a major version such as "131"; exclusive with browser_path)
+      # browser_path: /usr/bin/firefox   (use this installed browser, download only its driver; exclusive with version)
+      # offline: false                   (default; true never downloads, fails if the cache does not already hold the browser and driver)
+      # cache_dir: ~/.cache/bddkit/plugins/browser  (default)
+      # proxy: http://proxy:3128         (for the downloads)
+      # mirror_url: https://...          (mirror for browser and driver downloads, for networks that cannot reach Google, Mozilla and GitHub)
 default_browser: chrome
 ```
 
 | Key | Required | Default |
 |---|---|---|
 | `browser` | yes | — (`chrome`, `firefox` or `edge`) |
-| `url` | yes | — (the WebDriver endpoint: a Grid, a `selenium/standalone-*` container, a vendor cloud) |
+| `url` | no | none — set for remote mode, the WebDriver endpoint to connect to; omit for managed mode |
+| `version` | no | `stable` — managed mode only; exclusive with `browser_path` |
+| `browser_path` | no | none — managed mode only; exclusive with `version` |
+| `offline` | no | `false` — managed mode only |
+| `cache_dir` | no | `~/.cache/bddkit/plugins/browser` — managed mode only |
+| `proxy` | no | none — managed mode only |
+| `mirror_url` | no | none — managed mode only |
 | `base_url` | no | none — required for a relative `I am on` / `I should be on` |
 | `headless` | no | `true` |
 | `window` | no | `1280x800` |
@@ -60,6 +79,8 @@ default_browser: chrome
 | `capabilities` | no | `{}` |
 
 **One instance is one browser.** If your suite drives more than one, declare several instances and switch between them with `I use "<name>" browser`, the same way `I use "<name>" api` switches API resources.
+
+`selenium-manager` itself — the binary managed mode runs — comes from `$BDDKIT_SELENIUM_MANAGER` if set (a development override), then `PATH`, then a file kept beside the plugin library, which is where a release archive of this plugin puts it. See `examples/README.md`'s Managed mode section for a worked example.
 
 ## Checking a configuration
 
@@ -134,13 +155,14 @@ Between scenarios in the same feature file, the plugin clears `localStorage` and
 
 ## Parallel runs
 
-One browser session per feature file, opened on its first browser step and closed when the file ends; scenarios within a file share it and get the reset above between them. `concurrency: 8` in the host config is therefore eight browser sessions at once — in remote mode that is the Grid's own business to schedule and size, not this plugin's.
+One browser session per feature file, opened on its first browser step and closed when the file ends; scenarios within a file share it and get the reset above between them. `concurrency: 8` in the host config is therefore eight browser sessions at once — in remote mode that is the Grid's own business to schedule and size, not this plugin's; in managed mode it is eight browsers running on the machine `bddkit` itself runs on, so size `concurrency` to what that machine can hold.
 
 ## Known limits
 
 1. **`I attach the file` needs a browser that can see the path.** In remote mode the WebDriver server, not this process, opens the file, so a container-based Grid must have the path mounted or reachable on its own filesystem.
 2. **`wss://` WebDriver endpoints are not supported.** `url` must be plain HTTP.
 3. **No iframes, tabs or alerts.** Every lookup runs against the top-level document of the current tab; there is no step to switch frames, open or close a tab, or handle a native `alert`/`confirm`/`prompt`.
+4. **Managed mode is Unix-only.** `Mode::Managed` on a non-Unix build fails naming `url` as the way forward; remote mode is unaffected everywhere.
 
 ## Example
 

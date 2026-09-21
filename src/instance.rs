@@ -1,10 +1,13 @@
 //! One browser session for one feature file: opened on the file's first
 //! browser step, reset between its scenarios, closed when the file ends.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::bidi::Bidi;
 use crate::config::{InstanceConfig, Mode};
+#[cfg(unix)]
+use crate::managed::{self, ManagedDriver};
 use crate::webdriver::{Driver, Session, SessionInfo};
 
 pub struct Instance {
@@ -12,6 +15,9 @@ pub struct Instance {
     pub session: Session,
     pub info: SessionInfo,
     pub bidi: Option<Bidi>,
+    /// The driver process this instance started, managed mode only.
+    #[cfg(unix)]
+    driver: Mutex<Option<ManagedDriver>>,
 }
 
 /// Storage is cleared while the page is still on the application's origin:
@@ -25,13 +31,27 @@ impl Instance {
     /// `debug` seeds the driver's initial trace state only; every dispatch
     /// afterward follows the request through `Driver::set_debug`.
     pub fn open(config: InstanceConfig, debug: bool) -> Result<Self, String> {
-        let url = match &config.mode {
-            Mode::Remote { url } => url.clone(),
-            Mode::Managed(_) => return Err("managed mode arrives in the next task".to_string()),
+        let (url, binary, _driver) = match &config.mode {
+            Mode::Remote { url } => (url.clone(), None, None),
+            #[cfg(unix)]
+            Mode::Managed(m) => {
+                let resolved = managed::resolve(config.browser, m)?;
+                let process =
+                    ManagedDriver::start(&resolved.driver_path, debug, Duration::from_secs(10))?;
+                (process.url().clone(), resolved.browser_path, Some(process))
+            }
+            #[cfg(not(unix))]
+            Mode::Managed(_) => {
+                return Err(
+                    "managed mode is not supported on this platform; set \"url\" to a WebDriver endpoint"
+                        .to_string(),
+                );
+            }
         };
-        let driver = Arc::new(Driver::new(url.clone(), debug));
-        let (session, info) = driver
-            .new_session(&config.session_capabilities(None))
+        let driver_client = Arc::new(Driver::new(url.clone(), debug));
+        let binary = binary.map(|p| p.display().to_string());
+        let (session, info) = driver_client
+            .new_session(&config.session_capabilities(binary.as_deref()))
             .map_err(|e| {
                 format!(
                     "cannot open a {} session at {url}: {e}",
@@ -43,6 +63,8 @@ impl Instance {
             session,
             info,
             bidi: None,
+            #[cfg(unix)]
+            driver: Mutex::new(_driver),
         };
         let (w, h) = instance.config.window;
         if let Err(e) = instance.session.set_window_rect(w, h) {
@@ -89,9 +111,15 @@ impl Instance {
         if let Some(bidi) = &self.bidi {
             bidi.close();
         }
-        self.session
+        let result = self
+            .session
             .delete()
-            .map_err(|e| format!("closing the session: {e}"))
+            .map_err(|e| format!("closing the session: {e}"));
+        #[cfg(unix)]
+        if let Some(mut d) = self.driver.lock().ok().and_then(|mut g| g.take()) {
+            d.stop();
+        }
+        result
     }
 
     /// `doctor --live`: open, read the browser's name and version, close.

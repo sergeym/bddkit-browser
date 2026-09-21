@@ -46,3 +46,33 @@ jobs:
         run: docker compose up -d --wait
       - name: End-to-end
         run: cargo test --locked --test e2e -- --test-threads=1
+
+  e2e-firefox-managed:
+    name: e2e on a managed Firefox
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.97.1"
+          rustflags: ""
+      - name: Install bddkit
+        run: cargo install bddkit --version 0.2.0 --locked
+      # The real release asset names are linux-x86_64 / linux-arm64 / macos /
+      # windows.exe, never a bare "-linux" — check the artifact list before
+      # touching this if it ever needs a second platform.
+      - name: Fetch Selenium Manager
+        run: |
+          curl -sSL -o /usr/local/bin/selenium-manager \
+            https://github.com/SeleniumHQ/selenium_manager_artifacts/releases/latest/download/selenium-manager-linux-x86_64
+          chmod +x /usr/local/bin/selenium-manager
+          selenium-manager --version
+      - name: Cache browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bddkit/plugins/browser
+          key: managed-firefox-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: End-to-end (managed)
+        env:
+          BDDKIT_BROWSER_MANAGED: "1"
+        run: cargo test --locked --test e2e the_examples_pass_on_a_managed_firefox -- --nocapture
