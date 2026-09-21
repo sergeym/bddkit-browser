@@ -1,0 +1,37 @@
+[package]
+name = "bddkit-browser"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "Browser steps for the bddkit acceptance-testing tool: a real browser over WebDriver and BiDi"
+license = "Apache-2.0"
+repository = "https://github.com/sergeym/bddkit-browser"
+homepage = "https://github.com/sergeym/bddkit-browser"
+readme = "README.md"
+keywords = ["bdd", "gherkin", "testing", "webdriver", "bddkit"]
+categories = ["development-tools::testing"]
+exclude = ["/.github", "/.idea", "/docker-compose.yml", "/docs"]
+
+[lib]
+# rlib beside the cdylib so `tests/stub.rs` can call the exports in-process.
+crate-type = ["cdylib", "rlib"]
+
+[[example]]
+name = "site"
+path = "examples/site/main.rs"
+
+[dependencies]
+# Blocking on purpose: the host calls every export under spawn_blocking, and a
+# tokio runtime inside a cdylib that is never unloaded has no owner.
+ureq = { version = "3.4", features = ["json"] }
+tungstenite = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+url = "2"
+libc = "0.2"
+
+[dev-dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+tempfile = "3"

@@ -1,0 +1,7 @@
+/target
+# design artefacts stay local, never published with the plugin
+/docs/superpowers/
+# per-machine overrides
+/examples/browser.local.yaml
+/examples/.bddkit/plugins.local.yaml
+/.idea/
