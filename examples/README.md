@@ -1,6 +1,6 @@
 # Running the example
 
-One demo site, three commands. Everything needs `cargo build --release` first, and a `bddkit` binary (`cargo install bddkit`).
+One demo site, three commands, run from the repository root — `bddkit` resolves `paths` in the config against the working directory, not the config file's location, and `browser.yaml`'s `paths: [examples/features]` is written for that root. Everything needs `cargo build --release` first, and a `bddkit` binary (`cargo install bddkit`).
 
 ```bash
 docker compose up -d                 # selenium/standalone-chrome on :4444, host network
