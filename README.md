@@ -107,14 +107,26 @@ Selectors are CSS by default; prefix with `xpath=` for an XPath expression, or `
 | 23 | assertion | `the "<field>" field should contain "<value>"` | the field's value equals this exactly |
 | 24 | assertion | `the "<field>" checkbox should be checked` | the checkbox is ticked |
 | 25 | assertion | `the "<field>" checkbox should be unchecked` | the checkbox is not ticked |
+| 26 | action | `I dump the browser console` | writes the scenario's console entries as `console.json` into the artifacts directory |
+| 27 | action | `I dump the network log` | writes the scenario's requests (method, URL, status, headers, timings — no bodies) as `network.json` |
+| 28 | action | `I read the status of the last request to "<path>" as "<name>"` | stores the HTTP status of the most recent request whose path starts with this |
+| 29 | assertion | `the browser console should have no errors` | no console.error and no uncaught exception since the scenario started |
+| 30 | assertion | `the browser should have sent a "<method>" request to "<path>"` | some request of the scenario has this method and a path starting with this |
+| 31 | assertion | `the last request to "<path>" should have status "<code>"` | the most recent request whose path starts with this has completed with this status |
 
 ## Waits
 
-An action (0–14) waits up to `find_timeout_secs` for its element to appear, polling every 100 ms; `0` disables the wait and the action fails immediately on a missing element. An assertion (15–25) looks exactly once — it never polls on its own — so a condition that has not settled yet (a click that triggers an async render) is armed with the host's own eventual assertion: `I expect the next assertion to pass within "N" seconds`.
+An action (0–14, 26–28) waits up to `find_timeout_secs` for its element to appear, polling every 100 ms; `0` disables the wait and the action fails immediately on a missing element. An assertion (15–25, 29–31) looks exactly once — it never polls on its own — so a condition that has not settled yet (a click that triggers an async render, a request still in flight) is armed with the host's own eventual assertion: `I expect the next assertion to pass within "N" seconds`.
 
 ## Evidence
 
-A failed step dumps the current page's URL and title, always; a screenshot (PNG, path printed) and the last WebDriver request/reply, unless `on_failure` says otherwise. `on_failure` is a comma-separated subset of `screenshot`, `console`, `network` (the last two land once BiDi capture ships), or `none` to write nothing beyond the URL and title.
+A failed step dumps the current page's URL and title, always; a screenshot (PNG, path printed), the console log and the network log, unless `on_failure` says otherwise. `on_failure` is a comma-separated subset of `screenshot`, `console`, `network`, or `none` to write nothing beyond the URL and title.
+
+## Console and network
+
+Steps 26–31 read from the same BiDi buffers the failure dump does (`log.entryAdded` for the console, network events for requests), captured from the moment the session opens and cleared on the per-scenario reset. What is recorded: method, URL, status, headers and timings for a request — never request or response bodies — and, for a console entry, its level and text. A browser session opened without a `webSocketUrl` in its WebDriver reply (no BiDi support, or a Grid that does not pass it through) fails every one of these six steps, naming `webSocketUrl` in the error, rather than silently recording nothing.
+
+"The browser should have sent a request" and "the last request to `<path>` should have status" are this plugin's own assertions — they see only what the *browser* dispatched, over its own network stack, independent of any response the page's JavaScript did or didn't act on. They answer "did the SPA call the API". What the API answered to the host's own client — a separate connection — is the host's own `I request` / `the response code is` / `the response body contains JSON` steps, already available without this plugin. `examples/features/order.feature` runs both: the browser-side assertion that `POST /api/orders` happened and returned `201`, then the host's own GET of the same order by id.
 
 ## Reset
 

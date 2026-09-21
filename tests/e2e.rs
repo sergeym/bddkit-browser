@@ -117,20 +117,16 @@ fn start_site() -> Site {
     Site { child, port }
 }
 
-/// A throwaway project pointing at the site and the browser. `features`
-/// are copied in from the given directory.
-fn project(name: &str, site: &Site, features_dir: &Path) -> PathBuf {
+/// A throwaway project pointing at the site and the browser. Each name in
+/// `files` is copied in from `from`.
+fn project(name: &str, site: &Site, from: &Path, files: &[&str]) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("bddkit-browser-e2e-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("features")).expect("mkdir");
     std::fs::create_dir_all(dir.join(".bddkit")).expect("mkdir");
-    for entry in std::fs::read_dir(features_dir).expect("features dir") {
-        let entry = entry.expect("entry");
-        if entry.path().extension().is_some_and(|e| e == "feature") {
-            std::fs::copy(entry.path(), dir.join("features").join(entry.file_name()))
-                .expect("copy");
-        }
+    for file in files {
+        std::fs::copy(from.join(file), dir.join("features").join(file)).expect("copy");
     }
     std::fs::write(
         dir.join(".bddkit/plugins.yaml"),
@@ -168,11 +164,23 @@ fn negatives() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/features")
 }
 
+/// Every `.feature` file name directly under `dir`, for a `project` call
+/// that wants the whole directory rather than a hand-picked subset.
+fn feature_names(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .expect("features dir")
+        .map(|entry| entry.expect("entry").file_name().into_string().unwrap())
+        .filter(|name| name.ends_with(".feature"))
+        .collect()
+}
+
 #[test]
 fn the_examples_pass_against_the_demo_site() {
     let bin = require_stand!();
     let site = start_site();
-    let dir = project("examples", &site, &examples());
+    let names = feature_names(&examples());
+    let files: Vec<&str> = names.iter().map(String::as_str).collect();
+    let dir = project("examples", &site, &examples(), &files);
     let out = run(&bin, &dir);
     assert!(
         out.status.success(),
@@ -186,7 +194,7 @@ fn the_examples_pass_against_the_demo_site() {
 fn a_failing_step_dumps_the_page_a_screenshot_and_the_last_exchange() {
     let bin = require_stand!();
     let site = start_site();
-    let dir = project("failing", &site, &negatives());
+    let dir = project("failing", &site, &negatives(), &["failing.feature"]);
     let out = run(&bin, &dir);
     assert_eq!(
         out.status.code(),
@@ -210,10 +218,28 @@ fn a_failing_step_dumps_the_page_a_screenshot_and_the_last_exchange() {
 }
 
 #[test]
+fn a_console_error_fails_the_scenario_with_the_entries_in_the_dump() {
+    let bin = require_stand!();
+    let site = start_site();
+    let dir = project("console", &site, &negatives(), &["console_errors.feature"]);
+    let out = run(&bin, &dir);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("boom: the widget failed to load"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("uncaught in the widget"), "{stdout}");
+    assert!(stdout.contains("--- Console (json) ---"), "{stdout}");
+}
+
+#[test]
 fn doctor_live_probes_the_browser() {
     let bin = require_stand!();
     let site = start_site();
-    let dir = project("doctor", &site, &examples());
+    let names = feature_names(&examples());
+    let files: Vec<&str> = names.iter().map(String::as_str).collect();
+    let dir = project("doctor", &site, &examples(), &files);
     let out = Command::new(&bin)
         .args(["doctor", "--live", "--config", "cfg.yaml"])
         .current_dir(&dir)
