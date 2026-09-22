@@ -45,7 +45,7 @@ jobs:
       - name: Start Chrome
         run: docker compose up -d --wait
       - name: End-to-end
-        run: cargo test --locked --test e2e -- --test-threads=1
+        run: cargo test --locked --test e2e -- --test-threads=1 --nocapture
 
   e2e-firefox-managed:
     name: e2e on a managed Firefox

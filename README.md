@@ -12,7 +12,7 @@ The library is written to `target/release/`.
 
 ## Installing
 
-Point a plugin lock file at the built library, in one of:
+Tested against `bddkit` 0.2.0 (the version `ci.yml` pins for the end-to-end jobs). Point a plugin lock file at the built library, in one of:
 
 - `<directory of the --config file>/.bddkit/plugins.yaml` (project scope, takes precedence)
 - `~/.config/bddkit/plugins.yaml` (user scope)
@@ -166,7 +166,7 @@ One browser session per feature file, opened on its first browser step and close
 
 ## Example
 
-A full demo — a site, four feature files, a compose file — lives under `examples/`; see `examples/README.md` for how to run it.
+A full demo — a site, five feature files, a compose file — lives under `examples/`; see `examples/README.md` for how to run it.
 
 ## License
 

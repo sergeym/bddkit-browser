@@ -47,10 +47,10 @@ The first run downloads Firefox and geckodriver — hundreds of megabytes, once 
 ## Seeing a failure dump
 
 ```bash
-bddkit run --config examples/browser.yaml examples/features/login.feature --tag @nope
+bddkit run --config examples/browser.yaml tests/features/failing.feature
 ```
 
-runs nothing; to see a real dump, change an expected text in any feature and run it — the failure prints the current URL and title, a screenshot path under the run's temp directory, and the last WebDriver request and reply.
+A positional path argument overrides `paths`, so this runs only `tests/features/failing.feature` (a scenario that expects the wrong `<h1>` on `/login`, kept in this repository to prove the dump rather than as part of the demo). The failure prints the current URL and title, a screenshot path under the run's temp directory, and the last WebDriver request and reply.
 
 ## The Selenium container and `localhost`
 
