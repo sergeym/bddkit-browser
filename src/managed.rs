@@ -223,12 +223,23 @@ impl ManagedDriver {
 
     /// SIGTERM to the whole process group, two seconds of grace, SIGKILL.
     /// The group matters: killing only the driver would orphan the browser.
+    ///
+    /// Always signals the group, even when `try_wait` already shows the
+    /// driver itself gone: a driver that crashed still leaves the browser
+    /// it spawned running, orphaned, in that same group. `kill` on a group
+    /// with nothing left in it answers `ESRCH`, unchecked here on purpose.
     pub fn stop(&mut self) {
-        if matches!(self.child.try_wait(), Ok(Some(_))) {
-            return;
-        }
+        let driver_already_exited = matches!(self.child.try_wait(), Ok(Some(_)));
         let group = -(self.child.id() as i32);
         unsafe { libc::kill(group, libc::SIGTERM) };
+        if driver_already_exited {
+            // `try_wait` on the driver says nothing about the browser it
+            // orphaned; a short grace, then make sure with SIGKILL.
+            std::thread::sleep(Duration::from_millis(200));
+            unsafe { libc::kill(group, libc::SIGKILL) };
+            let _ = self.child.wait();
+            return;
+        }
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
             if matches!(self.child.try_wait(), Ok(Some(_))) {
@@ -382,5 +393,58 @@ mod tests {
         std::fs::set_permissions(&script, perms).expect("chmod");
         let e = ManagedDriver::start(&script, false, Duration::from_secs(2)).expect_err("exited");
         assert!(e.contains("exited") && e.contains('3'), "{e}");
+    }
+
+    #[test]
+    fn stop_kills_an_orphaned_child_even_after_the_driver_itself_already_exited() {
+        // A driver that crashes right after forking the browser leaves it
+        // running in the same process group. Simulate that with a script
+        // that backgrounds `sleep 60` (standing in for the browser) and
+        // exits at once itself.
+        let dir = tempfile::tempdir().expect("tmp");
+        let pid_file = dir.path().join("child.pid");
+        let script = dir.path().join("fake-driver");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nsleep 60 &\necho $! > {}\nexit 0\n",
+                pid_file.display()
+            ),
+        )
+        .expect("write");
+        let mut perms = std::fs::metadata(&script).expect("meta").permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        std::fs::set_permissions(&script, perms).expect("chmod");
+
+        let mut command = Command::new(&script);
+        command.process_group(0);
+        let child = command.spawn().expect("spawn");
+        // Give the script time to background `sleep 60`, write the pid
+        // file and exit; `ManagedDriver::start`'s readiness probe is
+        // irrelevant here, so this constructs the struct directly rather
+        // than going through it.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !pid_file.is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let child_pid: i32 = std::fs::read_to_string(&pid_file)
+            .expect("pid file")
+            .trim()
+            .parse()
+            .expect("a pid");
+        let mut driver = ManagedDriver {
+            child,
+            url: Url::parse("http://127.0.0.1:1/").expect("url"),
+        };
+        // Confirmed by the pid file existing: the script (and so the
+        // driver `Child`) has already exited before `stop` is called.
+        assert!(matches!(driver.child.try_wait(), Ok(Some(_))));
+
+        driver.stop();
+
+        // `kill(pid, 0)` sends no signal, just probes: 0 means the process
+        // still exists, -1 (ESRCH here) means it is gone.
+        let still_alive = unsafe { libc::kill(child_pid, 0) } == 0;
+        assert!(!still_alive, "the orphaned sleep 60 must be dead");
     }
 }
