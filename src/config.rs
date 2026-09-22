@@ -301,21 +301,26 @@ pub(crate) fn optional_bool(v: &Value, key: &str, default: bool) -> Result<bool,
     }
 }
 
+/// Parses `s` as an absolute URL with a host. A scheme-only string like
+/// "proxy:3128" or "localhost:4444" parses under WHATWG rules (opaque path,
+/// no host) but is not the network endpoint a caller of this module means;
+/// requiring a host refuses a missing "//" instead of silently accepting it.
+/// Every URL-shaped field routes through this one check — `url` included, so
+/// a driver endpoint typo'd without "//" is refused the same way `proxy` and
+/// `mirror_url` already are, rather than reaching `Url::parse` on its own.
+fn parse_url_with_host(s: &str, key: &str) -> Result<Url, String> {
+    let url = Url::parse(s).map_err(|e| format!("\"{key}\" {s:?} is not an absolute URL: {e}"))?;
+    if url.host().is_none() {
+        return Err(format!(
+            "\"{key}\" {s:?} is not an absolute URL: missing host"
+        ));
+    }
+    Ok(url)
+}
+
 fn optional_url(v: &Value, key: &str) -> Result<Option<Url>, String> {
     optional_string(v, key)?
-        .map(|s| {
-            let url = Url::parse(&s)
-                .map_err(|e| format!("\"{key}\" {s:?} is not an absolute URL: {e}"))?;
-            // A scheme-only string like "proxy:3128" parses under WHATWG rules
-            // (opaque path, no host) but is not the network endpoint the caller
-            // means; require a host so a missing "//" is refused, not silently accepted.
-            if url.host().is_none() {
-                return Err(format!(
-                    "\"{key}\" {s:?} is not an absolute URL: missing host"
-                ));
-            }
-            Ok(url)
-        })
+        .map(|s| parse_url_with_host(&s, key))
         .transpose()
 }
 
@@ -375,8 +380,7 @@ impl InstanceConfig {
                     ));
                 }
                 Mode::Remote {
-                    url: Url::parse(&u)
-                        .map_err(|e| format!("\"url\" {u:?} is not an absolute URL: {e}"))?,
+                    url: parse_url_with_host(&u, "url")?,
                 }
             }
             None => {
@@ -506,6 +510,10 @@ mod tests {
             ),
             (json!({"browser": "chrome", "url": ""}), "url"),
             (json!({"browser": "chrome", "url": "not a url"}), "url"),
+            // "localhost:4444" parses under WHATWG rules as scheme
+            // "localhost", opaque path "4444", no host — not the endpoint
+            // this means; must be refused the same way "proxy:3128" is.
+            (json!({"browser": "chrome", "url": "localhost:4444"}), "url"),
             (
                 json!({"browser": "chrome", "url": "http://h:4444", "bogus": 1}),
                 "bogus",
