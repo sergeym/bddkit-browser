@@ -65,6 +65,10 @@ impl Error {
     pub fn is_no_such_element(&self) -> bool {
         matches!(self, Self::Protocol { error, .. } if error == "no such element")
     }
+
+    pub fn is_invalid_selector(&self) -> bool {
+        matches!(self, Self::Protocol { error, .. } if error == "invalid selector")
+    }
 }
 
 impl fmt::Display for Error {

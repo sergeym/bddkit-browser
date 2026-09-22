@@ -23,6 +23,13 @@ pub struct Lookup {
     /// For messages: `link "Sign in"`, `element "#cart"`.
     pub what: String,
     pub strategies: Vec<(Strategy, String)>,
+    /// True for a named lookup (link/button/field) whose CSS strategy is the
+    /// bare-text fallback, not a selector the tester wrote. There an
+    /// `invalid selector` from the driver just means the text isn't valid
+    /// CSS — treat it as "no match", not as a broken query. `selector()`
+    /// keeps this false: its CSS comes straight from the tester, so an
+    /// invalid one is their bug to see, not a wait to swallow.
+    pub css_fallback_is_lenient: bool,
 }
 
 /// A `<selector>` argument: CSS by default, `xpath=…`, or `text=…` for an
@@ -46,6 +53,7 @@ pub fn selector(raw: &str) -> Lookup {
     Lookup {
         what: format!("element {raw:?}"),
         strategies: vec![strategy],
+        css_fallback_is_lenient: false,
     }
 }
 
@@ -64,6 +72,7 @@ pub fn link(text: &str) -> Lookup {
             ),
             (Strategy::Css, text.to_string()),
         ],
+        css_fallback_is_lenient: true,
     }
 }
 
@@ -89,6 +98,7 @@ pub fn button(text: &str) -> Lookup {
             ),
             (Strategy::Css, text.to_string()),
         ],
+        css_fallback_is_lenient: true,
     }
 }
 
@@ -121,6 +131,7 @@ pub fn field(text: &str) -> Lookup {
             ),
             (Strategy::Css, text.to_string()),
         ],
+        css_fallback_is_lenient: true,
     }
 }
 
@@ -133,8 +144,14 @@ pub fn option_xpath(text: &str) -> String {
 /// One look: the first strategy with an answer.
 pub fn find_once<'a>(session: &'a Session, lookup: &Lookup) -> Result<Option<Element<'a>>, Error> {
     for (strategy, value) in &lookup.strategies {
-        if let Some(element) = session.find(*strategy, value)? {
-            return Ok(Some(element));
+        match session.find(*strategy, value) {
+            Ok(Some(element)) => return Ok(Some(element)),
+            Ok(None) => {}
+            Err(e)
+                if lookup.css_fallback_is_lenient
+                    && *strategy == Strategy::Css
+                    && e.is_invalid_selector() => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(None)
