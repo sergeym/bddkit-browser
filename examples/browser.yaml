@@ -11,8 +11,9 @@ resources:
       browser: chrome
       url: http://localhost:4444        # docker compose up -d
       base_url: http://localhost:3000   # cargo run --example site
-      # headless: false                 # put this in browser.local.yaml to watch
+      headless: ${BROWSER_HEADLESS:-true}   # BROWSER_HEADLESS=false to watch
     firefox:                            # managed mode: no url, the plugin brings the browser
       browser: firefox
       base_url: http://localhost:3000
-default_browser: chrome
+      headless: ${BROWSER_HEADLESS:-true}   # BROWSER_HEADLESS=false to watch
+default_browser: ${DEFAULT_BROWSER:-chrome}

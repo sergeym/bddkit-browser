@@ -20,29 +20,26 @@ The site is plain HTML and vanilla JavaScript in `examples/site/static/`; edit a
 
 ## Watching the browser
 
-Create `examples/browser.local.yaml` (gitignored) — the host merges it over `browser.yaml`:
+`browser.yaml` sets `headless: ${BROWSER_HEADLESS:-true}` on both instances, so an environment variable flips it without editing the file:
 
-```yaml
-resources:
-  browser:
-    chrome:
-      headless: false
+```bash
+BROWSER_HEADLESS=false bddkit run --config examples/browser.yaml
 ```
 
-A visible window needs a browser on your own machine rather than in the container: see the Managed mode section below, and set `headless: false` on the `firefox` instance instead of `chrome`.
+(`examples/.env.local`, gitignored, works too — the host reads it the same way it reads `.env`/`.env.local` beside any config.) A visible Chrome still needs a window on your own machine rather than in the container: see the Managed mode section below and combine it with `DEFAULT_BROWSER=firefox`.
 
 ## Managed mode
 
-`browser.yaml` also declares a `firefox` instance with no `url`: managed mode, where the plugin brings its own browser through [Selenium Manager](https://github.com/SeleniumHQ/selenium_manager_artifacts) instead of talking to the container. Switch to it in `examples/browser.local.yaml` (gitignored, merges over `browser.yaml`):
+`browser.yaml` also declares a `firefox` instance with no `url`: managed mode, where the plugin brings its own browser through [Selenium Manager](https://github.com/SeleniumHQ/selenium_manager_artifacts) instead of talking to the container. `default_browser: ${DEFAULT_BROWSER:-chrome}` picks it the same way:
 
-```yaml
-default_browser: firefox
+```bash
+DEFAULT_BROWSER=firefox bddkit run --config examples/browser.yaml
 ```
 
 Then run without the container:
 
 ```bash
-BDDKIT_SELENIUM_MANAGER=/path/to/selenium-manager bddkit run --config examples/browser.yaml
+BDDKIT_SELENIUM_MANAGER=/path/to/selenium-manager DEFAULT_BROWSER=firefox bddkit run --config examples/browser.yaml
 ```
 
 The first run downloads Firefox and geckodriver — hundreds of megabytes, once — into `~/.cache/bddkit/plugins/browser`; later runs reuse that cache and start in seconds. `BDDKIT_SELENIUM_MANAGER` is a development override, for pointing at a `selenium-manager` binary you already have; the normal source is a release archive of this plugin, which carries `selenium-manager` beside `libbddkit_browser.so`, so a plain install needs no extra download step. Without either, the plugin also looks for `selenium-manager` on `PATH`. Building or fetching it yourself: grab the asset for your platform from the [selenium_manager_artifacts releases page](https://github.com/SeleniumHQ/selenium_manager_artifacts/releases/latest).
@@ -57,4 +54,4 @@ runs nothing; to see a real dump, change an expected text in any feature and run
 
 ## The Selenium container and `localhost`
 
-`docker-compose.yml` runs the browser container with `network_mode: host`, so the browser's `localhost:3000` is the site on your machine. On Docker Desktop (macOS, Windows) host networking is unavailable; set `base_url: http://host.docker.internal:3000` in `browser.local.yaml` instead.
+`docker-compose.yml` runs the browser container with `network_mode: host`, so the browser's `localhost:3000` is the site on your machine. On Docker Desktop (macOS, Windows) host networking is unavailable; edit `base_url` in `browser.yaml` to `http://host.docker.internal:3000`, or add a variable of your own there and set it in `examples/.env.local`.

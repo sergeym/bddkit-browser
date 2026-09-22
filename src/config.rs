@@ -222,7 +222,7 @@ const FIELDS: &[Field] = &[
         name: "headless",
         required: false,
         value_type: Some("boolean"),
-        description: "run without a window; defaults to true. Set false in a *.local.yaml layer to watch the browser",
+        description: "run without a window; defaults to true. Set false, or drive it from an environment variable with ${BROWSER_HEADLESS:-true}, to watch the browser",
         example: Some("false"),
     },
     Field {

@@ -43,7 +43,7 @@ resources:
       url: http://localhost:4444
       base_url: http://localhost:3000
       # optional:
-      # headless: false                  (default true; put this in a *.local.yaml layer to watch the browser)
+      # headless: false                  (default true; or drive it from an env var: headless: ${BROWSER_HEADLESS:-true})
       # window: 1280x800                 (default)
       # find_timeout_secs: 5             (default; 0 disables the wait)
       # on_failure: screenshot,console   (default: screenshot,console,network; "none" writes nothing)
