@@ -160,7 +160,7 @@ One browser session per feature file, opened on its first browser step and close
 ## Known limits
 
 1. **`I attach the file` needs a browser that can see the path.** In remote mode the WebDriver server, not this process, opens the file, so a container-based Grid must have the path mounted or reachable on its own filesystem.
-2. **`wss://` WebDriver endpoints are not supported.** `url` must be plain HTTP.
+2. **`wss://` BiDi is not supported.** `url` itself may be `http://` or `https://`; the real limit is that if the driver then advertises its BiDi channel at `wss://`, this plugin cannot connect to it (`tungstenite` carries no TLS here) — the session still opens, but the console and network steps (26–31) stay unavailable, the same as a driver with no BiDi at all.
 3. **No iframes, tabs or alerts.** Every lookup runs against the top-level document of the current tab; there is no step to switch frames, open or close a tab, or handle a native `alert`/`confirm`/`prompt`.
 4. **Managed mode is Unix-only.** `Mode::Managed` on a non-Unix build fails naming `url` as the way forward; remote mode is unaffected everywhere.
 

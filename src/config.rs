@@ -166,7 +166,7 @@ const FIELDS: &[Field] = &[
         name: "url",
         required: false,
         value_type: None,
-        description: "WebDriver endpoint to connect to (remote mode): a Selenium Grid, a selenium/standalone-* container, a vendor cloud. Omit it for managed mode, where the plugin brings the browser through Selenium Manager",
+        description: "WebDriver endpoint to connect to (remote mode): a Selenium Grid, a selenium/standalone-* container, a vendor cloud; http:// or https://. If the driver then advertises BiDi at wss://, the console and network steps stay unavailable. Omit it for managed mode, where the plugin brings the browser through Selenium Manager",
         example: Some("http://localhost:4444"),
     },
     Field {

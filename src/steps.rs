@@ -365,7 +365,7 @@ fn look<'a>(instance: &'a Instance, lookup: &Lookup) -> Result<Option<Element<'a
 fn bidi_or_fail(instance: &Instance) -> Result<&Bidi, Fail> {
     instance.bidi.as_ref().ok_or_else(|| {
         fatal(
-            "the session has no BiDi channel (the driver returned no webSocketUrl); the console and network steps need Chrome/Edge 116+, Firefox 129+, or a Grid that passes BiDi through",
+            "the session has no usable BiDi channel (the driver returned no webSocketUrl, or advertised one at wss://, which this version cannot connect to); the console and network steps need Chrome/Edge 116+, Firefox 129+, or a Grid that passes BiDi through over ws://",
         )
     })
 }

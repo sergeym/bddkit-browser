@@ -88,6 +88,17 @@ impl Instance {
             return Err(format!("cannot size the window to {w}x{h}: {e}"));
         }
         let bidi = match &instance.info.websocket_url {
+            // `tungstenite` carries no TLS in this build, so a `wss://`
+            // endpoint can never be connected — that is a known limit, not
+            // a broken session: skip BiDi rather than fail `open`.
+            Some(ws) if ws.starts_with("wss://") => {
+                if debug {
+                    eprintln!(
+                        "[browser] BiDi at wss:// is not supported in this version; console and network steps are unavailable"
+                    );
+                }
+                None
+            }
             Some(ws) => Some(Bidi::connect(ws, debug).map_err(|e| {
                 let _ = instance.session.delete();
                 format!("the session advertised BiDi at {ws} but it cannot be used: {e}")

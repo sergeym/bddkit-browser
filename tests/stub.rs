@@ -39,6 +39,9 @@ pub struct StubState {
     pub script_result: Value,
     /// When true the session reply advertises `webSocketUrl` = the stub's `/bidi`.
     pub bidi: bool,
+    /// When true the session reply advertises `webSocketUrl` as an
+    /// unreachable `wss://` endpoint instead of the stub's own `ws://`.
+    pub bidi_wss: bool,
     /// Sent on the socket right after the subscribe is acknowledged.
     pub events: Vec<Value>,
     /// Filled by `start_stub`.
@@ -136,7 +139,9 @@ async fn handle(
         ("GET", ["status"]) => reply(json!({"ready": true, "message": "stub"})),
         ("POST", ["session"]) => {
             let mut caps = json!({"browserName": "chrome", "browserVersion": "131.0"});
-            if st.bidi {
+            if st.bidi_wss {
+                caps["webSocketUrl"] = json!("wss://127.0.0.1:1/bidi");
+            } else if st.bidi {
                 caps["webSocketUrl"] = json!(st.ws_url);
             }
             reply(json!({"sessionId": "s1", "capabilities": caps}))
@@ -1150,6 +1155,28 @@ fn eventually_passes(handle: u64, index: u32, args: &[&str], dir: &Path) -> Valu
 fn without_bidi_the_console_and_network_steps_fail_naming_the_capability() {
     let _guard = serial();
     let stub = start_stub(StubState::default());
+    let handle = init(&stub, json!({"on_failure": "none"}));
+    let dir = artifacts();
+    for index in [DUMP_CONSOLE, DUMP_NETWORK, NO_CONSOLE_ERRORS] {
+        let r = dispatch(handle, index, &[], None, dir.path());
+        assert_eq!(r["status"], "fatal", "{index}");
+        assert!(
+            r["error"].as_str().expect("error").contains("webSocketUrl"),
+            "{r}"
+        );
+    }
+    drop_instance(handle);
+}
+
+#[test]
+fn a_wss_bidi_endpoint_opens_the_session_but_leaves_the_console_and_network_steps_unavailable() {
+    let _guard = serial();
+    let stub = start_stub(StubState {
+        bidi_wss: true,
+        ..Default::default()
+    });
+    // Init must succeed: a wss:// webSocketUrl is a known limit, not a
+    // reason to fail the session.
     let handle = init(&stub, json!({"on_failure": "none"}));
     let dir = artifacts();
     for index in [DUMP_CONSOLE, DUMP_NETWORK, NO_CONSOLE_ERRORS] {
