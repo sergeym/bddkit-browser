@@ -474,7 +474,9 @@ mod tests {
             let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\nshort");
         });
         let d = Driver::new(Url::parse(&format!("http://{addr}")).expect("url"), false);
-        let err = d.status().expect_err("a truncated body is a transport error");
+        let err = d
+            .status()
+            .expect_err("a truncated body is a transport error");
         assert!(matches!(err, Error::Transport(_)), "{err}");
         let exchange = d.last_exchange().expect("an exchange was recorded");
         assert_eq!(exchange.status, 200, "the status line did arrive");
