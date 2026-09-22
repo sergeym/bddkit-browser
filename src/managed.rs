@@ -29,7 +29,8 @@ pub struct Resolved {
 }
 
 /// The directory this library was loaded from, via `dladdr` on one of its
-/// own exports. The one `unsafe` in this module.
+/// own exports. The lookup's `unsafe`; the kill calls in `stop` are the
+/// others in this module.
 fn own_library_dir() -> Option<PathBuf> {
     let mut info: libc::Dl_info = unsafe { std::mem::zeroed() };
     let symbol = crate::bddkit_abi_version as *const libc::c_void;
@@ -172,11 +173,16 @@ impl ManagedDriver {
         let port = free_port()?;
         let mut command = Command::new(driver_path);
         command.arg(format!("--port={port}")).process_group(0);
-        if debug {
-            command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        // stdout is always discarded: a file's whole output is composed and
+        // printed once by the host, and the driver's own banner has no
+        // place inside that. stderr inherits under debug, for the trace a
+        // developer chasing a managed-mode problem actually wants.
+        command.stdout(Stdio::null());
+        command.stderr(if debug {
+            Stdio::inherit()
         } else {
-            command.stdout(Stdio::null()).stderr(Stdio::null());
-        }
+            Stdio::null()
+        });
         let child = command
             .spawn()
             .map_err(|e| format!("starting {}: {e}", driver_path.display()))?;

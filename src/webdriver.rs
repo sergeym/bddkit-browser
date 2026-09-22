@@ -219,10 +219,19 @@ impl Driver {
             }
         };
         let status = response.status().as_u16();
-        let text = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| Error::Transport(format!("{method} {url}: reading the reply: {e}")))?;
+        let text = match response.body_mut().read_to_string() {
+            Ok(t) => t,
+            Err(e) => {
+                let message = format!("{method} {url}: reading the reply: {e}");
+                self.record(Exchange {
+                    request: format!("{method} {path}"),
+                    request_body,
+                    status,
+                    response_body: message.clone(),
+                });
+                return Err(Error::Transport(message));
+            }
+        };
         if self.debug.load(Ordering::Relaxed) {
             eprintln!("[browser] {method} /{path} {status}");
         }
@@ -447,6 +456,34 @@ mod tests {
         assert!(!d.debug.load(Ordering::Relaxed));
         d.set_debug(true);
         assert!(d.debug.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_body_read_failure_still_records_an_exchange_before_failing() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            // Promise more body than we send, then drop the connection: the
+            // body read fails mid-stream rather than the request never
+            // getting a reply at all.
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\nshort");
+        });
+        let d = Driver::new(Url::parse(&format!("http://{addr}")).expect("url"), false);
+        let err = d.status().expect_err("a truncated body is a transport error");
+        assert!(matches!(err, Error::Transport(_)), "{err}");
+        let exchange = d.last_exchange().expect("an exchange was recorded");
+        assert_eq!(exchange.status, 200, "the status line did arrive");
+        assert!(
+            exchange.response_body.contains("reading the reply"),
+            "{}",
+            exchange.response_body
+        );
+        handle.join().expect("server thread");
     }
 
     #[test]
