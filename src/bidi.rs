@@ -6,7 +6,7 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -140,6 +140,13 @@ impl Bidi {
     pub fn connect(ws_url: &str, debug: bool) -> Result<Self, String> {
         let (mut socket, _) =
             tungstenite::connect(ws_url).map_err(|e| format!("BiDi socket {ws_url}: {e}"))?;
+        // Set before the subscribe reply is awaited, not after: otherwise a
+        // driver that never answers blocks this call forever instead of
+        // failing `open`.
+        if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
+            tcp.set_read_timeout(Some(Duration::from_millis(200)))
+                .map_err(|e| format!("BiDi socket timeout: {e}"))?;
+        }
         socket
             .send(Message::Text(
                 json!({"id": 1, "method": "session.subscribe", "params": {"events": EVENTS}})
@@ -149,11 +156,23 @@ impl Bidi {
             .map_err(|e| format!("BiDi subscribe: {e}"))?;
         // The subscribe reply comes before any event of interest; read it
         // here, synchronously, so the reader thread never has to route
-        // command replies.
+        // command replies. Bounded to 5s total: the 200ms socket timeout
+        // alone would otherwise let this loop run forever on a driver that
+        // keeps the socket open but never answers.
+        let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            let message = socket
-                .read()
-                .map_err(|e| format!("BiDi subscribe reply: {e}"))?;
+            if Instant::now() >= deadline {
+                return Err("BiDi subscribe: no reply within 5s".to_string());
+            }
+            let message = match socket.read() {
+                Ok(m) => m,
+                Err(tungstenite::Error::Io(e))
+                    if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(format!("BiDi subscribe reply: {e}")),
+            };
             let Message::Text(text) = message else {
                 continue;
             };
@@ -168,10 +187,6 @@ impl Bidi {
                 }
                 break;
             }
-        }
-        if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
-            tcp.set_read_timeout(Some(Duration::from_millis(200)))
-                .map_err(|e| format!("BiDi socket timeout: {e}"))?;
         }
         let buffers = Arc::new(Mutex::new(Buffers::default()));
         let stop = Arc::new(AtomicBool::new(false));
@@ -245,6 +260,35 @@ fn read_loop(mut socket: Socket, buffers: &Mutex<Buffers>, stop: &AtomicBool, de
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_socket_that_never_acknowledges_the_subscribe_times_out() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept");
+            let _ws = tungstenite::accept(stream).expect("handshake");
+            // Keep the connection open without ever answering the
+            // subscribe, past the client's own 5s deadline, then let it
+            // close (dropping the stream would report a broken pipe
+            // instead of the timeout this test wants to see).
+            std::thread::sleep(Duration::from_millis(5300));
+        });
+        let started = Instant::now();
+        let result = Bidi::connect(&format!("ws://{addr}"), false);
+        let err = match result {
+            Ok(_) => panic!("no ack ever arrives"),
+            Err(e) => e,
+        };
+        assert!(err.contains("no reply within 5s"), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(7),
+            "the wait must be bounded, not unbounded: {:?}",
+            started.elapsed()
+        );
+        handle.join().expect("server thread");
+    }
 
     fn request_sent(id: &str, method: &str, url: &str, ts: u64) -> Value {
         json!({"type": "event", "method": "network.beforeRequestSent", "params": {
